@@ -1,0 +1,498 @@
+---
+title: "Appendix"
+author: "Iker Caballero Bragagnini"
+date: "2023-04-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Package Installing
+
+```{r,results='hide',fig.show='hide'}
+library(tseries)
+library(fBasics)
+library(car)
+library(tseries)
+library(urca)
+library(forecast)
+library(rugarch)
+library(quantmod)
+library(ggplot2)
+library(fTrading)
+library(rmgarch)
+```
+
+# Exploratory Analysis
+
+### Data Import
+
+```{r,results='hide',fig.show='hide'}
+getSymbols("^N225",from="2000-01-01", to="2022-12-30")
+dim(N225)
+head(N225)
+tail(N225)
+nik=N225[,6]
+```
+
+### Graphs
+
+```{r,results='hide',fig.show='hide'}
+plot(nik,main="Nikkei 225")
+nik<-na.locf(nik, fromLast = TRUE)
+length(nik)
+plot(nik,main="Nikkei 225")
+```
+
+```{r,results='hide',fig.show='hide'}
+rendnik=diff(log(nik))
+rendnik<-rendnik[-1]
+
+par(mfrow=c(2,1))
+plot(nik,main="Nikkei 225")
+plot(rendnik, main="Returns Nikkei 225")
+```
+
+### Stationarity
+
+###### ACF & PACF
+
+```{r,results='hide',fig.show='hide'}
+par(mfrow=c(1,2)) 
+acf(nik,ylim=c(-1,1),main="Nikkei 225")
+pacf(nik,ylim=c(-1,1),main="Nikkei 225")
+
+par(mfrow=c(1,2)) 
+acf(rendnik,ylim=c(-1,1),main="Returns Nikkei 225")
+pacf(rendnik,ylim=c(-1,1),main="Returns Nikkei 225")
+```
+
+###### Independence of lags
+
+```{r,results='hide',fig.show='hide'}
+Box.test(nik, lag = 1, type = c("Ljung-Box"))
+Box.test(nik, lag = 5, type = c("Ljung-Box"))
+Box.test(nik, lag = 10, type = c("Ljung-Box"))
+Box.test(nik, lag = 15, type = c("Ljung-Box"))
+Box.test(nik, lag = 20, type = c("Ljung-Box"))
+
+Box.test(rendnik, lag = 1, type = c("Ljung-Box"))
+Box.test(rendnik, lag = 5, type = c("Ljung-Box"))
+Box.test(rendnik, lag = 10, type = c("Ljung-Box"))
+Box.test(rendnik, lag = 15, type = c("Ljung-Box"))
+Box.test(rendnik, lag = 20, type = c("Ljung-Box"))
+```
+
+###### Unit root tests for prices
+
+```{r,results='hide',fig.show='hide'}
+# Tests
+nik.df.b<-ur.df(nik, lags=20, selectlags = c("BIC"))
+nik.df.db<-ur.df(nik, type = c("drift"), lags=20, selectlags = c("BIC"))
+nik.df.tb<-ur.df(nik, type = c("trend"), lags=20, selectlags = c("BIC"))
+nik.pp.c<-ur.pp(nik, type = c("Z-tau"), model = c("constant"), use.lag = 20)
+nik.pp.t<-ur.pp(nik, type = c("Z-tau"), model = c("trend"), use.lag = 20)
+nik.kpss.c<-ur.kpss(nik, type = c("mu"), use.lag = 20)
+nik.kpss.t<-ur.kpss(nik, type = c("tau"), use.lag = 20)
+
+# Summary
+summary(nik.df.b)
+summary(nik.df.db)
+summary(nik.df.tb)
+summary(nik.pp.c)
+summary(nik.pp.t)
+summary(nik.kpss.c)
+summary(nik.kpss.t)
+
+# Plot
+plot(nik.df.b)
+plot(nik.df.db)
+plot(nik.df.tb)
+plot(nik.pp.c)
+plot(nik.pp.t)
+plot(nik.kpss.t)
+```
+
+###### Unit root tests for returns
+
+```{r,results='hide',fig.show='hide'}
+# Tests
+rendnik.df.b<-ur.df(rendnik, lags=20, selectlags = c("BIC"))
+rendnik.df.db<-ur.df(rendnik, type = c("drift"), lags=20, selectlags = c("BIC"))
+rendnik.df.tb<-ur.df(rendnik, type = c("trend"), lags=20, selectlags = c("BIC"))
+rendnik.pp.c<-ur.pp(rendnik, type = c("Z-tau"), model = c("constant"), use.lag = 20)
+rendnik.pp.t<-ur.pp(rendnik, type = c("Z-tau"), model = c("trend"), use.lag = 20)
+rendnik.kpss.c<-ur.kpss(rendnik, type = c("mu"), use.lag = 20)
+rendnik.kpss.t<-ur.kpss(rendnik, type = c("tau"), use.lag = 20)
+
+# Summary
+summary(rendnik.df.b)
+summary(rendnik.df.db)
+summary(rendnik.df.tb)
+summary(rendnik.pp.c)
+summary(rendnik.pp.t)
+summary(rendnik.kpss.c)
+summary(rendnik.kpss.t)
+```
+
+### Basic Statistics
+
+```{r,results='hide',fig.show='hide'}
+normalTest(rendnik,method="jb")
+normalTest(nik,method="jb")
+basicStats(rendnik)
+round(basicStats(nik),3)
+```
+
+```{r,results='hide',fig.show='hide'}
+hist(rendnik,breaks=20,freq=F, main = "Nikkei225 Log-returns")
+curve(dnorm(x, mean=mean(rendnik), sd=sd(rendnik)), col=2, add=T)
+```
+
+# ARMA Model Identification, Estimation & Diagnosis
+
+### Model Identification
+
+```{r,results='hide',fig.show='hide'}
+par(mfrow=c(1,2),font=2,font.lab=4,font.axis=2,las=1)
+acf(rendnik,ylim=c(-1,1),main="Returns Nikkei 225")
+pacf(rendnik,ylim=c(-1,1),main="Returns Nikkei 225")
+```
+
+### Model Estimation
+
+```{r,results='hide',fig.show='hide'}
+# White noise
+model_w = Arima(rendnik, order = c(0,0,0),include.mean = TRUE)
+model_w
+
+# AR(1)
+model_ar1 = Arima(rendnik, order = c(1,0,0),include.mean = TRUE)
+model_ar1
+
+# MA(1)
+model_ma1 = Arima(rendnik, order = c(0,0,1),include.mean = TRUE)
+model_ma1
+```
+
+### Diagnosis
+
+```{r,results='hide',fig.show='hide'}
+autoplot(model_ar1)
+tsdiag(model_ar1)
+par(mfrow=c(1,2),font=2,font.lab=4,font.axis=2,las=1)
+acf(model_ar1$residuals,ylim=c(-1,1),main="residuosar2")
+pacf(model_ar1$residuals,ylim=c(-1,1),main="residuosar2")
+
+qqnorm(model_ar1$residuals)
+qqline(model_ar1$residuals, datax = FALSE)
+normalTest(model_ar1$residuals,method="jb")
+```
+
+# GARCH Identification, Estimation & Diagnosis
+
+### Model Identification
+
+```{r,results='hide',fig.show='hide'}
+residuos=model_ar1$residuals
+residuos2=residuos^2
+
+par(mfrow=c(1,2),font=2,font.lab=4,font.axis=2,las=1)
+acf(residuos2,ylim=c(-1,1)) 
+pacf(residuos2,ylim=c(-1,1))
+
+Box.test(residuos2,lag=1,type='Ljung')
+Box.test(residuos2,lag=5,type='Ljung')
+Box.test(residuos2,lag=15,type='Ljung')
+Box.test(residuos2,lag=20,type='Ljung')
+```
+
+### Model Estimation GARCH
+
+```{r,results='hide',fig.show='hide'}
+# Model_ar1
+spec_ar1=ugarchspec(variance.model = list(model = "sGARCH", 
+garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), 
+distribution.model = "std")
+m_ar1 = ugarchfit(spec=spec_ar1,data=rendnik)
+m_ar1
+
+v_GARCH_ar1 = sigma(m_ar1)
+v_anualizada_GARCH_ar1=(250)^0.5*v_GARCH_ar1
+```
+
+### Model Estimation EGARCH
+
+```{r,results='hide',fig.show='hide'}
+spec2=ugarchspec(variance.model=list(model="eGARCH", garchOrder = c(1,1)),mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+m2_ar1=ugarchfit(spec=spec2,data=rendnik)
+m2_ar1
+
+v_GARCH_e = sigma(m2_ar1)
+v_anualizada_GARCH_e=(250)^0.5*v_GARCH_e
+```
+
+### Model Estimation GJR-GARCH
+
+```{r,results='hide',fig.show='hide'}
+spec3=ugarchspec(variance.model=list(model="gjrGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+m3_ar1=ugarchfit(spec=spec3,data=rendnik)
+m3_ar1
+
+v_GJR_GARCH = sigma(m3_ar1)
+v_anualizada_GJR_GARCH=(250)^0.5*v_GJR_GARCH 
+
+vol.obs <- (250)^0.5*abs(rendnik)
+```
+
+### Graph
+
+```{r,results='hide',fig.show='hide'}
+plot(vol.obs,col="black", main="Estimated Volatility",
+     cex.main=0.5,
+     ylim=c(0,2.3))
+lines(v_anualizada_GARCH_ar1,ylab="1 = 100%",col="blue")
+lines(v_anualizada_GARCH_e,ylab="1 = 100%",col="darkgreen")
+lines(v_anualizada_GJR_GARCH,ylab="1 = 100%",col="darkred")
+```
+
+# News Impact
+
+```{r,results='hide',fig.show='hide'}
+ni1=newsimpact(z = NULL, m_ar1)
+ni2=newsimpact(z = NULL, m2_ar1)
+ni3=newsimpact(z = NULL, m3_ar1)
+plot(ni1$zx, ni1$zy, ylab=ni1$yexpr, xlab=ni1$xexpr, type="l", col="blue", 
+     ylim=c(0.00015,0.0026),main = "News Impact Curves for the Models")
+lines(ni2$zx, ni2$zy, ylab=ni2$yexpr, xlab=ni2$xexpr, type="l", 
+      col="darkgreen")
+lines(ni3$zx, ni3$zy, ylab=ni3$yexpr, xlab=ni3$xexpr, type="l", 
+      col="darkred")
+```
+
+# Prediction
+
+### Static
+
+```{r,results='hide',fig.show='hide'}
+mpred_ar1=ugarchfit(spec=spec_ar1,data=rendnik,out.sample = 90)
+forc = ugarchforecast(mpred_ar1, n.ahead=90, n.roll= 0)
+show(forc)
+mpred_ar1@model$modeldata$T
+
+round(fpm(forc),6)
+
+uncvariance(m_ar1)^0.5
+
+mpred_e=ugarchfit(spec=spec2,data=rendnik,out.sample = 90)
+forc2 = ugarchforecast(mpred_e, n.ahead=90, n.roll= 0)
+show(forc2)
+mpred_e@model$modeldata$T
+
+round(fpm(forc2),6)
+
+uncvariance(m2_ar1)^0.5
+
+mpred_gjr=ugarchfit(spec=spec3,data=rendnik,out.sample = 90)
+forc3 = ugarchforecast(mpred_gjr, n.ahead=90, n.roll= 0)
+show(forc3)
+mpred_gjr@model$modeldata$T
+
+round(fpm(forc3),6)
+uncvariance(m3_ar1)^0.5
+```
+
+### Dynamic
+
+```{r,results='hide',fig.show='hide'}
+forc_1 = ugarchforecast(mpred_ar1, n.ahead=1, n.roll= 90)
+show(forc_1)
+mpred_ar1@model$modeldata$T
+
+round(fpm(forc_1),5)
+uncvariance(m_ar1)^0.5
+
+forc2_1 = ugarchforecast(mpred_e, n.ahead=1, n.roll= 90) 
+mpred_e@model$modeldata$T
+
+round(fpm(forc2_1),5)
+uncvariance(m2_ar1)^0.5
+
+mpred_gjr_1=ugarchfit(spec=spec3,data=rendnik,out.sample = 90)
+forc3_1 = ugarchforecast(mpred_gjr, n.ahead=1, n.roll= 90)
+show(forc3_1)
+mpred_gjr@model$modeldata$T
+
+round(fpm(forc3_1),5)
+uncvariance(m3_ar1)^0.5
+```
+
+# Historical & EMWA volatility
+
+### Historical Volatility
+
+```{r,results='hide',fig.show='hide'}
+Fechas<-as.Date(rownames(zoo(nik)))
+Fechas<-Fechas[-1] #eliminamos la primera observación de Fechas, la hemos perdido al calcular los rendimientos
+Tf=length(Fechas)
+
+resid.mod<- m_ar1@fit$residuals 
+
+n_vol=5 # periodos de media móvil
+vol.hist20 <- sqrt(SMA(resid.mod^2, n=n_vol) * 252)
+Fechas2<-Fechas[(n_vol+1):(Tf+1)]#hemos perdido las primeras 20 observaciones para calcular la primera varianza. Añadimos una observación m?s dado que con las 20 últimas observaciones calculamos la volatilidad 1 paso hacia adelante.
+
+n_vol=21
+vol.hist80 <- sqrt(SMA(resid.mod^2, n=n_vol) * 252)
+Fechas3<-Fechas[(n_vol+1):(Tf+1)]
+
+n_vol=63
+vol.hist160 <- sqrt(SMA(resid.mod^2, n=n_vol) * 252)
+Fechas4<-Fechas[(n_vol+1):(Tf+1)]
+
+n_vol=126
+vol.hist240 <- sqrt(SMA(resid.mod^2, n=n_vol) * 252)
+Fechas5<-Fechas[(n_vol+1):(Tf+1)]
+
+par(mfrow=c(2,2), cex=0.6, mar=c(2,2,3,1))
+plot(Fechas2, vol.hist20, type="l", ylab='variance', main='1 week moving average')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas3, vol.hist80, type="l", ylab='variance', main='1 month moving average')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas4, vol.hist160, type="l", ylab='variance', main='3 month moving average')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas5, vol.hist240, type="l", ylab='variance', main='6 month moving average')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+```
+
+### Exponential Weighted Moving Average
+
+```{r,results='hide',fig.show='hide'}
+vol.ewma0.95 <- sqrt(EWMA(resid.mod^2, lambda = 0.05)*252)# note: in EWMA lambda is actually 1-lambda
+vol.ewma0.75 <-  sqrt(EWMA(resid.mod^2, lambda = 0.25)*252) # note: in EWMA lambda is actually 1-lambda
+vol.ewma0.5 <-  sqrt(EWMA(resid.mod^2, lambda = 0.5)*252) # note: in EWMA lambda is actually 1-lambda
+vol.ewma0.25 <-  sqrt(EWMA(resid.mod^2, lambda = 0.75)*252) # note: in EWMA lambda is actually 1-lambda
+
+par(mfrow=c(2,2), cex=0.6, mar=c(2,2,3,1))
+plot(Fechas, vol.ewma0.95, type="l", ylab='variance', main='EWMA 0.95')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas, vol.ewma0.75, type="l", ylab='variance', main='EWMA 0.75')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas, vol.ewma0.5, type="l", ylab='variance', main='EWMA 0.5')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+plot(Fechas, vol.ewma0.25, type="l", ylab='variance', main='EWMA 0.25')
+lines(Fechas, v_anualizada_GJR_GARCH, type="l", ylab='variance',col="darkred",
+      lwd=0.5)
+
+```
+
+# VAR estimation
+
+```{r,results='hide',fig.show='hide'}
+spec1=ugarchspec(variance.model=list(model="gjrGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t=ugarchroll(spec1, data = rendnik, n.ahead = 1, forecast.length = 252, 
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.05,refit.window = "rolling")
+
+spec2=ugarchspec(variance.model=list(model="sGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t2=ugarchroll(spec2, data = rendnik, n.ahead = 1, forecast.length = 252, 
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.05,refit.window = "rolling")
+
+spec3=ugarchspec(variance.model=list(model="eGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t3=ugarchroll(spec3, data = rendnik, n.ahead = 1, forecast.length = 252,
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.05,refit.window = "rolling")
+
+
+plot(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t@forecast$VaR$`alpha(5%)`,type="l",ylab="VAR 95%",xlab="",col="darkred")
+lines(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t2@forecast$VaR$`alpha(5%)`,type="l",ylab="VAR 95%",xlab="",col="blue")
+lines(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t3@forecast$VaR$`alpha(5%)`,type="l",ylab="VAR 95%",xlab="",col="darkgreen")
+
+
+spec199=ugarchspec(variance.model=list(model="gjrGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t99=ugarchroll(spec1, data = rendnik, n.ahead = 1, forecast.length = 252, 
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.01,refit.window = "rolling")
+
+spec299=ugarchspec(variance.model=list(model="sGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t299=ugarchroll(spec2, data = rendnik, n.ahead = 1, forecast.length = 252, 
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.01,refit.window = "rolling")
+
+spec399=ugarchspec(variance.model=list(model="eGARCH", garchOrder = c(1,1)), mean.model=list(armaOrder=c(1,0)), distribution.model = "std")
+var.t399=ugarchroll(spec3, data = rendnik, n.ahead = 1, forecast.length = 252, 
+refit.every = 21, calculate.VaR = TRUE, VaR.alpha = 0.01,refit.window = "rolling")
+
+
+plot(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t99@forecast$VaR$`alpha(1%)`,type="l",ylab="VAR 99%",xlab="",col="darkred")
+lines(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t299@forecast$VaR$`alpha(1%)`,type="l",ylab="VAR 99%",xlab="",col="blue")
+lines(Fechas[(length(Fechas)-252+1):length(Fechas)],
+     var.t399@forecast$VaR$`alpha(1%)`,type="l",ylab="VAR 99%",xlab="",col="darkgreen")
+```
+
+# Multivariant GARCH Models
+
+```{r,results='hide',fig.show='hide'}
+# Mean and Volatility for FTSE100
+
+getSymbols("^FTSE",src="yahoo",from="2000-01-01", to="2022-12-30")  
+
+fts=FTSE[,6]
+head(fts)
+plot(fts)
+dim(fts)
+fts<-na.locf(fts, fromLast = TRUE)
+rendfts <- dailyReturn(fts)
+
+rX = cbind(rendnik, rendfts)
+
+spec_fts = ugarchspec(mean.model = list(armaOrder = c(1,0)), variance.model = 
+list(garchOrder = c(1,1), model = "sGARCH"), distribution.model = "std") 
+mod_fts1=ugarchfit(spec=spec_fts,data=rendfts)
+mod_fts1
+
+spec_fts2 = ugarchspec(mean.model = list(armaOrder = c(1,0)), variance.model = 
+list(garchOrder = c(1,1), model = "eGARCH"), distribution.model = "std") 
+mod_fts2=ugarchfit(spec=spec_fts2,data=rendfts) # -6.5266
+mod_fts2
+
+spec_fts3 = ugarchspec(mean.model = list(armaOrder = c(1,0)), variance.model = 
+list(garchOrder = c(1,1), model = "gjrGARCH"), distribution.model = "std") 
+mod_fts3=ugarchfit(spec=spec_fts3,data=rendfts) # -6.5213
+mod_fts3
+
+# DCC-GARCH
+
+mod_1 = ugarchspec(mean.model = list(armaOrder = c(1,0)), variance.model = 
+list(garchOrder = c(1,1), model = "gjrGARCH"), distribution.model = "std")
+mod_2 = ugarchspec(mean.model = list(armaOrder = c(1,0)), variance.model = 
+list(garchOrder = c(1,1), model = "eGARCH"), distribution.model = "std") 
+dcc.garch11 = dccspec(uspec = multispec(c(mod_1,mod_2)), dccOrder = c(1,1), 
+distribution = "mvt")
+dcc.fit = dccfit(dcc.garch11, data = na.omit(rX))
+dcc.fit
+
+# Correlation and News Impact
+
+cor1 = rcor(dcc.fit)
+dim(cor1)
+cor1
+cor_AM <- cor1[1,2,]
+cor_AM <- as.xts(cor_AM)
+plot(cor_AM,main="Correlation Between Nikkei225 and FTSE100")
+
+write.table(cor_AM,file="correlaciones.csv")
+nisurface(dcc.fit,type="cor")
+```
+
+
