@@ -5,7 +5,7 @@ from interfaces import *
 # Other Modules
 
 import numpy as np
-from scipy.integrate import quad
+from enum import Enum
 
 # Univariate Kernels
 

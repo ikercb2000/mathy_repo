@@ -400,3 +400,7 @@ FodyWeavers.xsd
 # Virtual Environment
 
 .venv
+
+# Project-specific
+
+experiments
