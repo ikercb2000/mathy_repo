@@ -1,12 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
-# Enums
-
-KernelTypes = Enum("KernelTypes", ["Gaussian", "Epanechikov", "Boxcar", "Tricube"])
-
 # Interface
-
 
 class IKernelEstimator(ABC):
 
@@ -18,9 +13,17 @@ class IKernelEstimator(ABC):
         pass
 
     @abstractmethod
-    def get_density(self, **kwargs):
+    def estimate_density(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def get_densities(self, **kwargs):
         pass
 
     @abstractmethod
     def get_conf_bands(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def plot_results(self, **kwargs):
         pass
