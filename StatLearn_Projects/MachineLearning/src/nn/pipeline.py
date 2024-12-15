@@ -1,6 +1,6 @@
 # Project Modules
-from StatLearn_Projects.MachineLearning.src.nn.classes import *
-from StatLearn_Projects.MachineLearning.src.nn.utils import *
+from classes import *
+from utils import *
 
 # Other Modules
 from sklearn.model_selection import train_test_split
@@ -14,13 +14,14 @@ activations = {"input": None, "1": "relu", "output": "softmax"}
 
 # Parameters
 
-loss = keras.losses.SparseCategoricalCrossentropy()  # Crossentropy for multi-class classification
-optimizer = keras.optimizers.Adam()  # Optimizer
+loss = keras.losses.SparseCategoricalCrossentropy() 
+optimizer = keras.optimizers.Adam()
 metrics = [keras.metrics.AUC(), keras.metrics.Accuracy(), keras.metrics.Precision()]
-n_batches = 32  # Batch size
-epochs = 10  # Number of epochs
+n_batches = 32 
+epochs = 10
 
 # Parameters for GridSearch
+
 param_grid = {
     'batch_size': [32, 64],
     'epochs': [10, 20],
@@ -29,16 +30,15 @@ param_grid = {
     'neurons': [64, 128, 256],
 }
 
-# Input Processing (using Fashion MNIST for example)
+# Input Processing
+
 (train_x, train_y), (test_x, test_y) = keras.datasets.fashion_mnist.load_data()
 
-# Reshaping and Normalizing Data
 train_x = train_x.reshape(-1, 28 * 28)  # Flatten images to vectors of size 28*28
 test_x = test_x.reshape(-1, 28 * 28)  # Flatten images to vectors of size 28*28
 train_x = train_x.astype('float32') / 255.0  # Normalize to range [0, 1]
 test_x = test_x.astype('float32') / 255.0  # Normalize to range [0, 1]
 
-# Train-Test Split (just to follow your structure)
 train_x, val_x, train_y, val_y = train_test_split(train_x, train_y, test_size=0.3, random_state=42)
 
 # Model Generation
@@ -76,6 +76,7 @@ print("\nLoss: ", loss)
 print("\nMetrics:\n", pd.DataFrame(metrics))
 
 # Model Predictions
+
 preds = nn_handler.predict(test_x=test_x, batch_size=n_batches, callbacks=None)
 
 for i in range(len(preds["pred"])):

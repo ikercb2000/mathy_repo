@@ -1,7 +1,7 @@
 # Project Modules
 
-from StatLearn_Projects.MachineLearning.src.nn.interfaces import *
-from StatLearn_Projects.MachineLearning.src.nn.utils import *
+from interfaces import *
+from utils import *
 
 # Other Modules
 
@@ -18,8 +18,8 @@ class NeuralNetworkHandler():
 
         self.model = model
 
-    def __str__(self, **kwargs):
-        return super().__str__(**kwargs)
+    def __str__(self):
+        return "Neural Network Handler"
 
     def compile(
         self,
@@ -126,9 +126,7 @@ class VanillaNNGenerator(IModelGenerator):
 
         model.add(keras.layers.Dense(units=units["input"],input_shape = input_shape))
 
-        for k in units.keys()[1:-2]:
-
-            print(units.keys()[1:-2])
+        for k in list(units.keys())[1:-1]:
 
             model.add(keras.layers.Dense(units=units[k],activation=activation[k]))
         
