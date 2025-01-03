@@ -105,11 +105,11 @@ class NeuralNetworkHandler():
             if is_classif(self.model):
 
                 pred_class = tf.argmax(predictions[i]).numpy()
-                preds["preds"].append(pred_class)
+                preds["pred"].append(pred_class)
 
             else:
                 
-                preds["preds"].append(predictions[i])
+                preds["pred"].append(predictions[i])
 
         return preds
     
