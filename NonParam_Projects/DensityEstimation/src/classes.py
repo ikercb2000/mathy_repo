@@ -5,6 +5,7 @@ from utils import *
 
 # Other Modules
 
+from statsmodels.nonparametric.kde import KDEUnivariate
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -20,20 +21,16 @@ class KernelDensityEstimator:
     def __str__(self):
         return "Density Estimator"
         
-    def get_densities(self, eval_points: np.ndarray, support: np.ndarray, bw: float):
+    def get_densities(self, data: np.ndarray, bw: float, alpha: float = 0.05):
 
-        self.eval_points = eval_points
-        self.support = support
-        self.bw = bw
-        self.densities = kde_density(eval_points=eval_points,support=support,bw=bw,kernel=self.kde_type)
-        self.variances = kde_variance(eval_points=eval_points,support=support,bw=bw,kernel=self.kde_type,densities=self.densities)
-        self.variances = np.maximum(self.variances,1e-10)
+        kde = KDEUnivariate(data)
+        self.densities = kde.fit(kernel=self.kde_type,bw=bw)
+        variances = kde_variance(data=data,bw=bw)
+        self.variances = np.maximum(variances,1e-10)
         
-        return {"eval_points": self.eval_points,
-                "support": self.support,
-                "bandwidth": self.bw,
-                "densities": self.densities,
+        return {"densities": self.densities,
                 "variances": self.variances,
+                "bandwidth": bw,
                 }
 
     def get_conf_bands(self, alpha: float = 0.05):

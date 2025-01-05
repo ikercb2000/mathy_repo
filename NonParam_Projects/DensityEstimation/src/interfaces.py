@@ -15,15 +15,7 @@ class IKernelEstimator(ABC):
         pass
 
     @abstractmethod
-    def estimate_density(self, **kwargs):
-        pass
-
-    @abstractmethod
     def get_densities(self, **kwargs):
-        pass
-
-    @abstractmethod
-    def get_conf_bands(self, **kwargs):
         pass
 
     @abstractmethod
