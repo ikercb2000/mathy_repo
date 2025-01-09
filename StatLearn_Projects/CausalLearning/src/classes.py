@@ -7,8 +7,70 @@ from interfaces import *
 
 from dowhy import CausalModel
 from dowhy.causal_estimator import CausalEstimate
+from econml.dml import DML, CausalForestDML, NonParamDML, KernelDML
+from econml.dr import DRLearner
 import pandas as pd
 
+# ML Model Classes
+
+class DMLEstimator(IEconMLEstimator):
+
+    def __init__(self, estim_type: DMLType = DMLType.LinearDML):
+
+        if estim_type == DMLType.LinearDML:
+            
+            self.est = DML()
+
+        elif estim_type == DMLType.ForestDML:
+            
+            self.est = CausalForestDML()
+
+        elif estim_type == DMLType.KernelDML:
+            
+            self.est = KernelDML()
+
+        elif estim_type == DMLType.NonParamDML:
+            
+            self.est = NonParamDML()
+
+    def set_params(self, params_dict: dict):
+
+        self.params_dict = params_dict
+
+    def fit(self, Y, T, X, W, groups,inference, return_est: bool = False):
+
+        for k,v in self.params_dict.items():
+            setattr(self.est,k,v)
+
+        self.est.fit(Y=Y,T=T,X=X,W=W,groups=groups,inference=inference)
+
+        if return_est:
+            
+            return self.est
+        
+# Parameter Setters
+
+class DMLParameters(IEconMLParameters):
+
+    def __init__(self, estim_type: DMLType = DMLType.LinearDML):
+
+        self.estim_type = estim_type
+
+    def show_attrib(self):
+
+        dict_params = {} # TODO: Escribir aquí parámetros generales
+
+        if self.estim_type == DMLType.LinearDML:
+
+            dict_params["..."] = None   # TODO: Escribir aquí parámetros especiales
+
+            print("Dictionary of parameters (no values):\n\n",dict_params,"\n\n")  #TODO: Borrar webs
+
+            print("To set additional attributes visit: ","https://econml.azurewebsites.net/_autosummary/econml.dml.DML.html#econml.dml.DML")
+
+            return dict_params
+
+        
 # Model Builder Class
 
 class CausalModelBuilder(ICausalModelBuilder):

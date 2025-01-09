@@ -30,3 +30,7 @@ warnings.filterwarnings("ignore")
 
 pipeline = CausalPipeline(data, treatment, outcome, effect_method, refuter_method, common_causes)
 estimate, refutation = pipeline.run()
+
+#TODO: Make Enums to choose effect_method in DoWhy and estimator in EconML
+#TODO: Make Enums to choose refuter method
+#TODO: Make logic to show the attributes via website if there are none or establish dictionary
