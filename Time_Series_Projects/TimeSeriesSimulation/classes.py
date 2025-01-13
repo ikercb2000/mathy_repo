@@ -22,25 +22,28 @@ class TimeSeriesSimulator(ISeriesSimulator):
 
         times = range(0, n)
         det_values = np.array(self.determ(det_params, times))
+
         if self.noise != None:
-            noise_values = np.array(self.noise.cdf(size=n))
+            noise_values = np.array(self.noise.draw(size=n))
         else:
             noise_values = np.array([0]*len(det_values))
         
-        series = det_values+noise_values
+        series = det_values + noise_values
 
-        sim_dict ={"Value": series, "Determ": det_values, "Noise": noise_values}
+        sim_dict = {"Value": series, "Determ": det_values, "Noise": noise_values}
         self.series = pd.DataFrame(sim_dict)
 
         return self.series
 
-    def plot_sim(self,scatter_plot: bool = False):
+    def plot_sim(self, scatter_plot: bool = False):
 
         plt.figure(figsize=(10, 6))
+
         if scatter_plot:
             plt.scatter(self.series.index, self.series['Value'], label='Time Series')
         else:
             plt.plot(self.series.index, self.series['Value'], label='Time Series')
+
         plt.plot(self.series.index, self.series['Determ'], label="Real Values", color="red", linestyle= "--")
         plt.xlabel('Time')
         plt.ylabel('Value')
