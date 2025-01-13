@@ -1,8 +1,8 @@
 # Project Modules
 
-from Time_Series_Projects.TimeSeriesSimulation.interfaces import *
-from Probability_Projects.DistribSimulation.interfaces import *
-from Time_Series_Projects.TimeSeriesSimulation.utils import *
+from Time_Series_Projects.TimeSeriesSimulation.src.interfaces import *
+from Probability_Projects.DistribSimulation.src.interfaces import *
+from Time_Series_Projects.TimeSeriesSimulation.src.utils import *
 
 # Other Modules
 
