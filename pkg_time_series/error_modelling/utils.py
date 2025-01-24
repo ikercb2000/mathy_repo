@@ -1,6 +1,6 @@
 # Project Modules
 
-from Time_Series_Projects.ErrorModelling.src.interfaces import *
+from .interfaces import *
 
 # Other Modules
 

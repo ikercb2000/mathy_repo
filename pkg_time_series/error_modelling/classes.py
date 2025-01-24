@@ -1,8 +1,8 @@
 # Project Modules
 
-from Time_Series_Projects.ErrorModelling.src.interfaces import *
-from Time_Series_Projects.ErrorModelling.src.utils import *
-from Probability_Projects.DistribSimulation.src.classes import *
+from .interfaces import *
+from .utils import *
+from .classes import *
 
 # Other Modules
 

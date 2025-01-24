@@ -1,6 +1,6 @@
 # Project Modules
-from classes import *
-from utils import *
+from .classes import *
+from .utils import *
 
 # Other Modules
 from sklearn.model_selection import train_test_split

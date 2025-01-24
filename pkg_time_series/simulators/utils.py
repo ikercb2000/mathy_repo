@@ -1,6 +1,6 @@
 # Project modules
 
-from Time_Series_Projects.TimeSeriesSimulation.src.interfaces import *
+from .interfaces import *
 
 # Other modules
 

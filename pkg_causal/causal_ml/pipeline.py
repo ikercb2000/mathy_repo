@@ -1,6 +1,6 @@
 # Project Modules
 
-from classes import *
+from .classes import *
 
 # Other modules
 

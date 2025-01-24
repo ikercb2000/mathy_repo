@@ -1,6 +1,6 @@
 # Project Modules
 
-from interfaces import *
+from .interfaces import *
 
 # Other Modules
 

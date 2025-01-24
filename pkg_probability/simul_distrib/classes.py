@@ -1,6 +1,6 @@
 # Project modules
 
-from Probability_Projects.DistribSimulation.src.interfaces import *
+from .interfaces import *
 
 # Other modules
 

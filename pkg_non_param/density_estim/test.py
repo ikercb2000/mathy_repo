@@ -1,6 +1,6 @@
 # Project Modules
 
-from classes import KernelDensityEstimator, KernelType
+from .classes import KernelDensityEstimator, KernelType
 
 # Other Modules
 
