@@ -1,0 +1,407 @@
+---
+title: "Untitled"
+author: "Iker Caballero, Victor Jimenez"
+date: "2023-05-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+library(glmnet)
+library(tidyr)
+```
+
+```{r}
+c_light <- c("#DCBCBC")
+c_light_highlight <- c("#C79999")
+c_mid <- c("#B97C7C")
+c_mid_highlight <- c("#A25050")
+c_dark <- c("#8F2727")
+c_dark_highlight <- c("#7C0000")
+
+# Plot posterior quantiles
+plot_post_quantiles = function(fit, in_data, title){
+
+  large_slope_idx = which(abs(in_data$beta_true) > 1.2)
+  fit = as.data.frame(fit)
+  
+  beta <- matrix(nrow = nrow(fit), ncol = p)
+  for (i in 1:14) {
+    col_name <- paste("beta[", i, "]", sep = "")
+    beta[,i] <- fit[[col_name]]
+  }
+  params = list(
+    beta = beta,
+    sigma = fit$sigma
+  )
+  
+  idx <- rep(1:in_data$p, each=2)
+  x <- sapply(1:length(idx), function(m) if(m %% 2 == 0) idx[m] + 0.5 else idx[m] - 0.5)
+  pad_beta_true <- do.call(cbind, lapply(idx, function(n) in_data$beta_true[n]))
+  
+  probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+  cred <- sapply(1:in_data$p, function(m) quantile(params$beta[,m], probs=probs))
+  pad_cred <- do.call(cbind, lapply(idx, function(n) cred[1:9,n]))
+  
+  min(c(in_data$beta_true, cred[1,]))
+  
+  plot(1, type="n", main=title,
+       xlim=c(0.5, in_data$p + 0.5), xlab="Slope Index",
+       ylim=c(min(c(in_data$beta_true, cred[1,])), max(c(in_data$beta_true, cred[9,]))),
+       ylab="Slope Posterior")
+  sapply(large_slope_idx, function(idx) abline(v=idx, col="gray80", lwd=2, lty=3))
+  
+  polygon(c(x, rev(x)), c(pad_cred[1,], rev(pad_cred[9,])),
+          col = c_light, border = NA)
+  polygon(c(x, rev(x)), c(pad_cred[2,], rev(pad_cred[8,])),
+          col = c_light_highlight, border = NA)
+  polygon(c(x, rev(x)), c(pad_cred[3,], rev(pad_cred[7,])),
+          col = c_mid, border = NA)
+  polygon(c(x, rev(x)), c(pad_cred[4,], rev(pad_cred[6,])),
+          col = c_mid_highlight, border = NA)
+  lines(x, pad_cred[5,], col=c_dark, lwd=2)
+  
+  lines(x, pad_beta_true, lwd=1.5, col="white")
+  lines(x, pad_beta_true, lwd=1.25, col="black")
+}
+```
+
+# Preprocessing of the data
+
+First we load the data and select the explanatory variables. The explanatory dataset will be normalized and the target variable vector only centered, so that the slopes for the different values are comparable at scale but depend on the scale of the target variables, which will improve their interpretability.
+
+```{r}
+load("boston.Rdata")
+
+#Select explanatory and response variables
+boston = boston.c[c("CRIM","ZN","INDUS","CHAS","NOX","RM","AGE","DIS",
+                    "RAD","TAX","PTRATIO","B","LSTAT","CMEDV")]
+
+Y = scale(boston$CMEDV, center=TRUE, scale=FALSE) # center target var
+X1 = scale(boston[,c(-4,-14)], center=TRUE, scale=TRUE)  # remove CHAS and normalize explanatory
+X = cbind(X1, as.numeric(boston$CHAS)-1) # add CHAS after scaling
+X = cbind(1+numeric(dim(X)[1]), X) # add a vector of ones
+colnames(X) = c("X0", colnames(X1), "CHAS") 
+```
+
+In order to improve the performance of the regressor, missing and extreme values will be removed from the explanatory dataset:
+
+```{r}
+proportion.extremes <- function(x) {
+  lower = mean(x, na.rm = TRUE) - 3 * sd(x, na.rm = TRUE)
+  upper = mean(x, na.rm = TRUE) + 3 * sd(x, na.rm = TRUE)
+  return(list(lower, upper))
+}
+
+remove_extremes <- function(df) {
+  for (col in names(df)) {
+    if (is.numeric(df[[col]])) {
+      extreme_values <- df[[col]] < proportion.extremes(df[[col]])[[1]] | 
+        df[[col]] > proportion.extremes(df[[col]])[[2]]
+      
+      df <- df[!extreme_values, ] # removes them
+    }
+  }
+  return(df)
+}
+
+X = remove_extremes(X)
+p = dim(X)[2] # 13 explanatory + independent
+N = dim(X)[1] # 506 observations
+```
+
+Finally, the data will be split into a test and a training datasets, so that we are able to provide metrics of the regression procedure. We will use a third of the data for the testing phase.
+
+```{r}
+set.seed(123)
+
+ind_test = sample(1:nrow(X),nrow(X)*(1/3))
+Xtrain = X[-ind_test,]
+Xtest = X[ind_test,]
+Ytrain = Y[-ind_test,]
+Ytest = Y[ind_test,]
+```
+
+# Frequentist Lasso
+
+To perform lasso using the frequentist approach, we make use of the `glmnet` library. We will perform a cross-validation search for the optimal penalization parameter $\lambda$, and then obtain the full regression results using this parameter.
+
+```{r}
+lasso.f <- glmnet(Xtrain,Ytrain, standardize=FALSE, intercept=FALSE)
+cv.lasso.f <- cv.glmnet(Xtrain,Ytrain, standardize=FALSE, intercept=FALSE) # cross-validation
+```
+
+```{r}
+plot(cv.lasso.f)
+plot(lasso.f, xvar="lambda", label=TRUE)
+abline(v=log(cv.lasso.f$lambda.min),col=2,lty=2)
+abline(v=log(cv.lasso.f$lambda.1se),col=2,lty=2)
+```
+
+The smallest $\lambda$ value corresponds to $\lambda_{min} = \min_{\lambda} MSE(\lambda)$ and the second value corresponds to $\lambda_{\sigma} = \max_\lambda \{ \lambda | MSE \left(\lambda_\sigma\right)=MSE\left(\lambda_{\min }\right)+\sigma\left(MSE\left(\lambda_{\min }\right)\right) \}$; that is, the maximum value of $\lambda$ for which the mean error lays on the range of errors found for $\lambda_{min}$. This second parameter is significant in lasso regression, since the shrinkage of the vector is not the main factor determining the suitability of the model, but the number of coefficients that are made zero. In this sense, providing a more sparse vector that behaves almost as good as the optimal might be adequate in certain cases.
+
+In this case, with $\lambda_{min}$ we obtain a model with 11 non-zero parameters, whereas with $\lambda_\sigma$ we obtain a model with 7 non-zero slopes. For our purposes, $\lambda_{min}$ does not provide a sparse enough solution and for that reason the latter will be selected. Moreover, by looking at the beta paths plot, it is intuitive to consider as a sparser alternative the values $\lambda_3$ and $\lambda_5$, which are the minimum value of the penalty (therefore of MSE) that considers only three and five non-zero parameters, respectively. This sparser solutions are expected to contain the most relevant sources of correlation and thus provide a good prediction when new observations are centered in covariate distribution.
+
+```{r}
+# For lambda_min:
+beta.min = lasso.f$beta[,cv.lasso.f$index[1]]
+as.data.frame(beta.min[which(beta.min !=0)])
+
+# For lambda_SE:
+beta.se = lasso.f$beta[,cv.lasso.f$index[2]]
+as.data.frame(beta.se[which(beta.se !=0)])
+
+# For lambda_5
+lambda.5.pos = which(lasso.f$df == 5)
+lambda.5.pos = lambda.5.pos[length(lambda.5.pos)]
+beta.5 = lasso.f$beta[,lambda.5.pos]
+as.data.frame(beta.5[which(beta.5 !=0)])
+
+# For lambda_3
+lambda.3.pos = which(lasso.f$df == 3)
+lambda.3.pos = lambda.3.pos[length(lambda.3.pos)]
+beta.3 = lasso.f$beta[,lambda.3.pos]
+as.data.frame(beta.3[which(beta.3 !=0)])
+```
+
+We can see that the five estimates with the higher absolute value in the 7-parameter regression can not exactly be those selected for the 5-parameter regression, even if their numerical value is similar. In order to evaluate the quality of the predictions, we will use the test dataset and provide metrics via the confusion matrix:
+
+```{r}
+Ypred.min = Xtest%*%as.matrix(beta.min, ncol=1)
+Ypred.se = Xtest%*%as.matrix(beta.se, ncol=1)
+Ypred.5 = Xtest%*%as.matrix(beta.5, ncol=1)
+Ypred.3 = Xtest%*%as.matrix(beta.3, ncol=1)
+
+# Mean Absolute Error
+MAE.min = mean(abs(Ypred.min - Ytest))
+MAE.se = mean(abs(Ypred.se - Ytest))
+MAE.5 = mean(abs(Ypred.5 - Ytest))
+MAE.3 = mean(abs(Ypred.3 - Ytest))
+
+# Mean Squared Error
+MSE.min = mean((Ypred.min - Ytest)^2)
+MSE.se = mean((Ypred.se - Ytest)^2)
+MSE.5 = mean((Ypred.5 - Ytest)^2)
+MSE.3 = mean((Ypred.3 - Ytest)^2)
+
+data.frame("min"=c(MAE.min, MSE.min), "SE"=c(MAE.se, MSE.se), "df=5"=c(MAE.5, MSE.5), "df=3"=c(MAE.3, MSE.3), row.names = c("MAE", "MSE"))
+```
+
+As we can see, the consideration of additional regressors with low estimate values does not improve the prediction metrics significantly. These results will be used as a reference for the interpretation and validation of the different bayesian models.
+
+```{r}
+Ypred.freqlasso = Xtest%*%as.matrix(beta.min, ncol=1)
+
+
+df <- data.frame(Value = c(Ypred.freqlasso, Ytest),
+                 MEDV = c(rep('Predicted', length(Ypred.freqlasso)),
+                              rep('Test', length(Ytest))))
+
+# Create the density plot
+ggplot(df, aes(x=Value, color=MEDV)) +
+  geom_density(alpha=0.5, linewidth=1.3) +
+  labs(x='MEDV', y='Density')
+```
+
+# Bayesian Lasso
+
+The data that will be fed to the different Bayesian models is the following:
+
+```{r}
+input_data = list(
+  N = dim(Xtrain)[1], # number of observations
+  p = p, # number of covariates (13+1)
+  X = Xtrain, # data matrix of covariates
+  y = Ytrain # target vector
+)
+
+data_plot = append(input_data, list(beta_true = beta.min))
+```
+
+## Narrow weakly informative prior
+
+First, we will run a model with a weakly-informative prior for the parameters. We use "weakly-informative" because we will indeed favor the shrinkage of the parameters by considering a narrow normal distribution. Instead of directly imposing sparsity, we expect from this model an equivalent to the ridge regression. A pure non-informative approach has been omitted in this project, as it would correspond to a non-regularized optimizer, equivalent to OLS regression.
+
+$$
+\begin{aligned}y & \sim \mathcal{N}\left(\beta x, \sigma \right) \\\beta & \sim \mathcal{N} (0,1) \\\sigma& \sim \mathcal{N}(0,2)\end{aligned}
+$$
+
+```{r}
+fit.weak1 = stan(file="weak_1.stan", data=append(input_data, list(Nval=dim(Xtest)[1], Xval=Xtest)), seed=123)
+```
+
+```{r}
+print(fit.weak1)
+```
+
+As we can see, the four chains converged (`Rhat=1`). We can now visualize the different $\beta$ estimates in the same plot:
+
+```{r}
+posterior.1 = as.data.frame(fit.weak1)
+bayesplot::mcmc_areas(posterior.1, prob=0.8, pars = names(posterior.1)[1:p-1]) + 
+  scale_y_discrete(labels=colnames(X)) +
+  geom_vline(aes(xintercept=0.3), linetype='dashed') + 
+  geom_vline(aes(xintercept=-0.3), linetype='dashed') +
+  geom_vline(aes(xintercept=1.2), linetype='dashed', color='red') + 
+  geom_vline(aes(xintercept=-1.2), linetype='dashed', color='red')
+```
+
+If we use the frequentist estimates as a guide, we can draw vertical threshold lines indicating the values for which the estimates with $\lambda_5$ (black) and $\lambda_3$ (red) were different than zero. The latter is drawn in red because some estimates below that threshold are clearly centered away from zero, and for that reason cannot be compared with the frequentist case. However, the $\lambda_5$ model indeed resembles the frequentist Lasso. It is significant, however, that even if there are also five components with a significantly high value, three of them are not coincident with the frequentist case: `DIS`, `RAD` and `NOX` have significantly high non-zero values. For the other two, however, the centers of the distribution coincide with the values given in the frequentist case.
+
+An alternative way of viewing the results, if compared with the frequentist solution:
+
+```{r}
+plot_post_quantiles(fit.weak1, data_plot, "Narrow weakly-informative prior")
+```
+
+## Wide weakly informative prior
+
+In this section we will perform the same analysis but using a slightly wider distribution as the $\beta$ prior. Using the frequentist case results, we approximate the range of the estimates to be \$[-4,4]\$, and therefore a normal distribution with $\sigma=2$ will be used instead. We expect the model to converge in the same way.
+
+```{r}
+fit.weak2 = stan(file="weak_2.stan", data=input_data, seed=123)
+```
+
+```{r}
+posterior.2 = as.data.frame(fit.weak2)
+bayesplot::mcmc_areas(posterior.2, prob=0.8, pars = names(posterior.2)[1:p-1]) + 
+  scale_y_discrete(labels=colnames(X)) +
+  geom_vline(aes(xintercept=0.3), linetype='dashed') + 
+  geom_vline(aes(xintercept=-0.3), linetype='dashed') +
+  geom_vline(aes(xintercept=1.2), linetype='dashed', color='red') + 
+  geom_vline(aes(xintercept=-1.2), linetype='dashed', color='red')
+```
+
+This model overestimates those parameters with a higher value, if compared with the frequentist results and the previous narrow prior. This behaviour is associated with the discussion about the scale, and the inability of these priors to impose shrinkage on a local scale in the parameter space.
+
+```{r}
+plot_post_quantiles(fit.weak2, data_plot, "Wide weakly-informative prior")
+```
+
+## Laplace prior
+
+The last example of a non-local bayesian prior will be the Laplace prior, which is the first step towards a sparsity bayesian model. As mentioned earlier, this prior should have the same non-locality issues as the weakly-informative priors, but should show a more sparse solution than these.
+
+```{r}
+fit.laplace = stan(file="laplace.stan", data=input_data, seed=123)
+```
+
+```{r}
+posterior.lap = as.data.frame(fit.laplace)
+bayesplot::mcmc_areas(posterior.lap, prob=0.8, pars = names(posterior.lap)[1:p-1]) + 
+  scale_y_discrete(labels=colnames(X)) +
+  geom_vline(aes(xintercept=0.3), linetype='dashed') + 
+  geom_vline(aes(xintercept=-0.3), linetype='dashed') +
+  geom_vline(aes(xintercept=1.2), linetype='dashed', color='red') + 
+  geom_vline(aes(xintercept=-1.2), linetype='dashed', color='red')
+```
+
+The solution obtained in this case has increased sparsity, but the threshold level is located at a low value, and for that reason only the estimates associated with `AGE`, `INDUS` and `x0` have been significantly reduced to zero. The rest of the parameters behave in a similar way as in the narrow weakly-predictive prior case.
+
+```{r}
+plot_post_quantiles(fit.laplace, data_plot, "Laplace prior")
+```
+
+## The Horseshoe
+
+As it was argued earlier, in order to consider proper sparsity in our Bayesian analysis we need to consider the two Horseshoe variants. We will use as threshold for the global scale:
+
+$$
+\tau_0 = \frac{p_0}{p - p_0} \frac{\sigma}{\sqrt{N}}
+$$
+
+where $p_0$ is the expected number of non-zero variables. When we want to prescind of this term, we will simply use $p_0 = p/2$, so that $\tau_0 = \sigma / \sqrt{N}$.
+
+```{r}
+p0 = 5; # expected number of non-zero parameters
+ppar = p0/(p-p0)
+fit.horseshoe = stan(file="horseshoe.stan", data=append(input_data, list(ppar=ppar)), seed=123)
+```
+
+```{r}
+print(fit.horseshoe)
+```
+
+```{r}
+posterior.horseshoe = as.data.frame(fit.horseshoe)
+bayesplot::mcmc_areas(posterior.horseshoe, prob=0.8, pars = names(posterior.horseshoe)[1:p-1]) + 
+  scale_y_discrete(labels=colnames(X)) +
+  geom_vline(aes(xintercept=0.3), linetype='dashed') + 
+  geom_vline(aes(xintercept=-0.3), linetype='dashed') +
+  geom_vline(aes(xintercept=1.2), linetype='dashed', color='red') + 
+  geom_vline(aes(xintercept=-1.2), linetype='dashed', color='red') +
+  xlim(-5,5)
+```
+
+```{r}
+plot_post_quantiles(fit.horseshoe, data_plot, "Horseshoe Prior")
+```
+
+We do not observe a significant improvement in sparsity, and the main difference with the Laplace prior model is the increased variance of the posterior distributions associated with certain covariates. Even if these covariates have now a higher probability of being sparse, their disproportionate variance hinders the interpretability of the solution.
+
+## Finish horseshoe
+
+Finally, we will consider the modification of the horseshoe model:
+
+```{r}
+data_horsefinn = append(input_data, list(ppar=ppar, Nval=dim(Xtest)[1], Xval=Xtest))
+```
+
+```{r}
+p0 = 5; # expected number of non-zero parameters
+ppar = p0/(p-p0)
+fit.horseshoefinn = stan(file="horseshoefinn.stan", data=data_horsefinn, seed=123)
+```
+
+```{r}
+print(fit.horseshoefinn)
+```
+
+```{r}
+posterior.horseshoefinn = as.data.frame(fit.horseshoefinn)
+bayesplot::mcmc_areas(posterior.horseshoefinn, prob=0.5, pars = names(posterior.horseshoefinn)[1:p-1]) + 
+  scale_y_discrete(labels=colnames(X)) +
+  geom_vline(aes(xintercept=0.3), linetype='dashed') + 
+  geom_vline(aes(xintercept=-0.3), linetype='dashed') +
+  geom_vline(aes(xintercept=1.2), linetype='dashed', color='red') + 
+  geom_vline(aes(xintercept=-1.2), linetype='dashed', color='red') +
+  xlim(-5,5)
+```
+
+```{r}
+plot_post_quantiles(fit.horseshoefinn, data_plot, "Finnish Horseshoe Prior")
+```
+
+## Doing predictions
+
+```{r}
+postpred = rstan::extract(fit.horseshoefinn, permuted = TRUE)$yval
+bayesplot::ppc_dens_overlay(y = Ytest, yrep = postpred)
+```
+
+```{r}
+p_value = mean(colSums(postpred) > sum(Ytest))
+p_value
+```
+
+Close to 5.
+
+```{r}
+mae = mean(abs(colMeans(postpred) - Ytest))
+mse = mean((colMeans(postpred) - Ytest)^2)
+
+mae
+mse
+```
+
+```{r}
+df <- data.frame(Value = c(colMeans(postpred), Ytest),
+                 MEDV = c(rep('Predicted', length(colMeans(postpred))),
+                              rep('Test', length(Ytest))))
+
+# Create the density plot
+ggplot(df, aes(x=Value, color=MEDV)) +
+  geom_density(alpha=0.5, linewidth=1.3) +
+  labs(x='MEDV', y='Density')
+```

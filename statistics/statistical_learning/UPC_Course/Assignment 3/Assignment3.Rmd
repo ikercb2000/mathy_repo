@@ -1,0 +1,118 @@
+--
+title: "Assignment 3 Statistical Learning"
+author: "Miguel Benítez, Iker Caballero, Alejandro Peraza"
+date: "2023-02-26"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rsample)
+library(pROC)
+library(caret)
+```
+
+# Comparing discriminant rules. ROC curve and other methods
+
+## Data loading and splitting
+```{r}
+spam <- read.table("spambase.data",sep=",")
+spam.names <- c(read.table("spambase.names",sep=":",skip=33,nrows=53,as.is=TRUE)[,1],
+                "char_freq_#",read.table("spambase.names",sep=":",skip=87,nrows=3,as.is=TRUE)[,1],"spam.01")
+
+names(spam) <- spam.names 
+n <- dim(spam)[1]
+p <- dim(spam)[2]-1
+
+View(spam)
+
+set.seed(1726)
+split <- rsample::initial_split(spam, prop = 0.7, strata = spam.01)
+training_set <- rsample::training(split)
+testing_set <- rsample::testing(split)
+X_train <- scale(training_set[,1:p]) # Scale the predictors
+y_train <- training_set[,(p + 1)]
+X_test <- scale(testing_set[,1:p]) # Scale the new data
+y_test <- testing_set[,(p + 1)]
+
+length(y_test)
+length(y_train)
+```
+
+## Logistic regression fitted by maximum likelihood
+
+In order to estimate the logistic regression model, we use the "glm" package:
+
+```{r}
+logit_mod <- glm(y_train ~ X_train,family = "binomial")
+test_logit <- predict(logit_mod,X_test,type="response")
+```
+
+Now, we can get the ROC curve using the "pROC" package:
+
+```{r}
+plot(roc(y_test~test_logit),col="blue")
+```
+
+For comparison purposes, we can also show the missclasification rate and the lval measure:
+
+```{r}
+predict = ifelse(test_logit > 0.5,1,0)
+accuracy = caret::confusionMatrix(factor(predict),factor(y_test),positive="1")$overall[1]
+lval = (1/n)*colSums(y_test*log(test_logit)+(1-y_test)*log(1-test_logit),na.rm = TRUE)
+```
+
+## Logistic regression fitted by Lasso
+
+(Parte de Miguel)
+
+```{r}
+# Use the training sample to fix the tunning parameters (when needed)
+# and to estimate the model parameters (when needed)
+```
+
+(Diría de usar todos la librería pROC)
+
+```{r}
+# Use the test sample to compute and plot the ROC curve for each rule.
+## Store the ROC curve plot in a variable to display them at the end
+# Compute also the misclassification rate for each rule when using the
+# cut point c = 1/2.
+## Store the ROC curve plot in another variable to display them at the end
+```
+
+```{r}
+# Compute l_val for each rule.
+## Store it in a variable to display at the end
+```
+
+## k-nn binary regression
+
+(Parte de Alejandro)
+
+```{r}
+# Use the training sample to fix the tunning parameters (when needed)
+# and to estimate the model parameters (when needed)
+```
+
+(Diría de usar todos la librería pROC)
+
+```{r}
+# Use the test sample to compute and plot the ROC curve for each rule.
+## Store the ROC curve plot in a variable to display them at the end
+# Compute also the misclassification rate for each rule when using the
+# cut point c = 1/2.
+## Store the ROC curve plot in another variable to display them at the end
+```
+
+```{r}
+# Compute l_val for each rule.
+## Store it in a variable to display at the end
+```
+
+## Results
+
+(Grid de las ROC y las l_val)

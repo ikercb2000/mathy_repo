@@ -1,0 +1,252 @@
+
+## Monthly GDP in Spain
+
+PIBsp: GDP mp Supply in Spain (Current prices). Quarterly data
+
+https://www.ine.es/dynt3/inebase/es/index.htm?padre=5614&capsel=5615
+
+Afiliados: AFFILIATION OF WORKERS TO THE SOCIAL SECURITY SYSTEM. Monthly data
+
+https://expinterweb.mites.gob.es/series/
+
+
+
+```{r}
+library("astsa")
+gdpOri=read.csv2("pibsp.csv",header=F)/1000
+```
+
+
+
+```{r}
+gdp=ts(c(t(cbind(matrix(NA,length(gdpOri),2),gdpOri))),freq=12,start=c(1995,1),end=c(2019,12))
+plot(gdp,type="p")
+abline(v=1995:2023,lty=3,col=4)
+```
+
+
+### PART I
+
+```{r}
+y=gdp
+y[is.na(y)]=0
+num=length(y)
+A = array(1, dim=c(1,1,num))
+dim(A)
+for(k in 1:num) if (y[k] == 0) A[k]= matrix(0)
+```
+
+
+```{r}
+mu0=matrix(y[3])
+y[3]
+Sigma0=matrix(100)
+cR=matrix(1e-6)
+```
+
+
+
+```{r}
+Linn=function(param){
+  Phi=matrix(param[1])
+  cQ=matrix(param[2])
+  kf=Kfilter(y,A,mu0,Sigma0,Phi,cQ,cR)
+  return(kf$like)
+}
+```
+
+
+```{r}
+initpar=c(1,10)
+est=optim(initpar,Linn,NULL,method="BFGS",hessian=TRUE)
+stderr=sqrt(diag(solve(est$hessian)))
+
+(Phi=est$par[1])
+(cQ=est$par[2])
+```
+
+
+```{r}
+ks1=Ksmooth(y,A,mu0, Sigma0,Phi,cQ,cR)
+```
+
+
+```{r}
+smo1=ts(data.frame(GDP=c(unlist(ks1$Xs))),start=c(1995,1),freq=12)
+Psmo1=ts(data.frame(GDP=c(unlist(ks1$Ps))),start=c(1995,1),freq=12)
+```
+
+```{r}
+llim1=smo1+qnorm(0.025)*sqrt(Psmo1)
+ulim1=smo1+qnorm(0.975)*sqrt(Psmo1)
+```
+
+
+```{r}
+smo1
+```
+
+
+```{r}
+ts.plot(smo1,llim1,ulim1,gdp,col=c(2,4,4,1),type="o",lty=c(1,3,3,1),xlim=c(2011,2016),ylim=c(240,290),main="PIB mensual")
+```
+
+________________________________________________________________________
+
+## PART II
+
+```{r}
+afil=ts(read.table("afiliados.csv",header=F)[,1]/1000000,start=c(1995,1),end=c(2019,12),freq=12)
+plot(afil)
+abline(v=1995:2023,lty=3,col=4)
+```
+
+
+
+```{r}
+ser=afil
+num=length(ser)
+y=matrix(ser,ncol=1)
+
+
+A = matrix(c(1,0,1,rep(0,10)),nr=1)
+
+Phi=matrix(0,nc=13,nr=13)
+Phi[1:2,1:2]=matrix(c(1,0,1,1),nrow=2)
+Phi[3,3:13]=rep(-1,11)
+Phi[4:13,3:12]=diag(1,10)
+mu0=c(y[1],rep(0,12))
+Sigma0=diag(rep(10,13))
+```
+
+
+
+```{r}
+Linn=function(para){
+  cQ1=para[1]    
+  cQ2=para[2]   
+  cQ3=para[3]   
+  cR=para[4]
+  cQ=diag(c(cQ1,cQ2,cQ3,rep(0,10)))
+  kf=Kfilter(y,A,mu0,Sigma0,Phi,cQ,cR)
+  return(kf$like)
+}
+```
+
+
+```{r}
+initpar=c(0.1,0.01,0.01,0)
+est=optim(initpar,Linn,NULL,method="BFGS",hessian=TRUE)
+stderr=sqrt(diag(solve(est$hessian)))
+
+para=est$par
+cQ1=para[1]   
+cQ2=para[2]   
+cQ3=para[3]   
+cR=para[4]  
+cQ=diag(c(cQ1,cQ2,cQ3,rep(0,10)))
+```
+
+```{r}
+kf=Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)   
+```
+
+
+```{r}
+T=length(y)
+smo=ts(data.frame(level=unlist(kf$Xs)[1+(0:(T-1))*13],slope=unlist(kf$Xs)[2+(0:(T-1))*13],seasonal=unlist(kf$Xs)[3+(0:(T-1))*13]),start=1995,freq=12)
+plot(smo)
+```
+
+
+```{r}
+afil2=afil-smo[,"seasonal"]
+plot(afil,type="o")
+lines(afil2,col=2,lwd=2)
+```
+
+
+
+________________________________________________________________________
+
+
+## PART III
+
+```{r}
+cor(ts.union(gdp,afil2),use="pairwise.complete.obs")
+plot(ts.union(gdp,afil2),type="o")
+```
+
+
+```{r}
+cor(ts.union(gdp,log(afil2)),use="pairwise.complete.obs")
+plot(ts.union(gdp,log(afil2)),type="o")
+
+serie=cbind(gdp,log(afil2))
+dimnames(serie)[[2]]=c("GDP","lnAfil")
+```
+
+
+
+```{r}
+y=cbind(gdp,afil2)
+y[is.na(gdp),1]=0
+num=nrow(y) 
+
+A = array(diag(2), dim=c(2,2,num))
+for(k in 1:num) if (y[k,1] == 0) A[1,1,k]=0
+
+mu0=y[3,]
+Sigma0=diag(c(100,100),2)
+Phi=diag(1,2)
+cQ=diag(c(2,1),2)
+cR=diag(1e-6,2)
+
+
+em=EM(y,A,mu0,Sigma0,Phi,cQ,cR,max.iter=500,tol=1e-5)
+em$Phi
+em$Q
+```
+          
+
+```{r}
+T=nrow(y)
+ks2=Ksmooth(y,A,em$mu0, em$Sigma0,em$Phi,t(chol(em$Q)),t(chol(em$R))) 
+smo=ts(data.frame(lnGDP=unlist(ks2$Xs)[1+(0:(T-1))*2],afil=unlist(ks2$Xs)[2+(0:(T-1))*2]),start=1995,freq=12)
+Psmo=ts(data.frame(lnGDP=unlist(ks2$Ps)[1+(0:(T-1))*4],afil=unlist(ks2$Ps)[4+(0:(T-1))*4]),start=1995,freq=12)
+```
+
+
+```{r}
+llim=smo+qnorm(0.025)*sqrt(Psmo)
+ulim=smo+qnorm(0.975)*sqrt(Psmo)
+smo2=smo[,1]
+llim2=llim[,1]
+ulim2=ulim[,1]
+```
+
+```{r}
+smo2
+```
+
+```{r}
+par(mfrow=c(2,1),mar=c(3,3,1,1))
+ts.plot(smo1,llim1,ulim1,gdp,col=c(2,4,4,1),type="o",lty=c(1,3,3,1),xlim=c(2011,2015),ylim=c(250,280),main="PIB mensual")
+
+ts.plot(smo2,llim2,ulim2,gdp,col=c(2,4,4,1),type="o",lty=c(1,3,3,1),xlim=c(2011,2015),ylim=c(250,280),main="PIB mensual + Afiliados (Proxy)")
+par(mfrow=c(1,1))
+```
+
+```{r}
+ts.plot(smo1,smo2,gdp,col=c(2,3,1),lwd=2,type="o",xlim=c(2012,2015),ylim=c(245,270),main="PIB mensual")
+legend("topleft",col=c(2,3),lty=1,lwd=2,legend=c("PIB","PIB+lnAfil"))
+```
+
+```{r}
+cbind(gdp,smo1,smo2)
+```
+```{r}
+cor(ts.union(gdp,afil2),use="pairwise.complete.obs")
+cor(ts.union(smo1,afil2))
+cor(ts.union(smo2,afil2))
+```

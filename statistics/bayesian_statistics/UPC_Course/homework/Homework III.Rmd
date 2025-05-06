@@ -1,0 +1,54 @@
+---
+title: "Homework III"
+author: "Iker Caballero Bragagnini"
+date: "2023-04-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exercise 1)
+
+Given the information, we can interpret the different parameters as follows:
+
+- The $\beta_0$ parameter represents the inherent mean adrenaline effect of applying both types of anesthesia. This means that $\beta_0$ is the mean extra level of adrenaline during the anesthesia that applying any of both types causes to a given dog.
+
+- The $\beta_1$ parameter represents the mean adrenaline effect of applying anesthesia A. This means that $\beta_1$ is the mean extra level of adrenaline during the anesthesia that applying anesthesia A yields for a given dog (hence, when $A_i=1$), apart from the effect $\beta_0$, which is present in both types.
+
+- The $\sigma$ parameter represents the variability of the adrenaline during the anesthesia with respect to its mean value, which can occur because of randomness or other unexplained factors (in the model).
+
+## Exercise 2)
+
+In order to decide which kind of anesthesia to use, one needs to obtain the posterior predictive distribution so that we can work with the distribution of future adrenaline values during the anesthesia. This is because we have a criteria regarding the usage of type A and B: when there is a probability larger than 0.05 that the level of adrenaline during anesthesia could be higher than 1.5, we decide to use anesthesia B.
+
+Hence, we need to work with this distribution from the information and distributions given. We can do this mathematically or computationally, so we show both ways.
+
+To use the computational method, we follow the next steps:
+
+- The first step is to simulate a large number of draws from the joint posterior density $\pi(\beta_0,\beta_1,\sigma|y)$. These observations will allow us to build the posterior predictive distribution, as now we obtain a distribution of values for possible values for $\beta_0$,$\beta_1$ and $\sigma$.
+
+- Using the observations obtained before, one can plug the values for $\beta_0$,$\beta_1$ and $\sigma$ in the distribution of $y$, $N(x_i+\beta_0+\beta_1A_i,\sigma)$, in order to obtain a posterior predictive distribution for given values $x_i$ and $A_i$. In this case, we fix $x_i=0.6$ and $A_i=1$ because we want to decide whether to give anesthesia A or B, and our criteria is based on the distribution of $y$ when using anesthesia A.
+
+- Finally, one simulates various observations to obtain the posterior predictive distribution for a given dog when we apply anesthesia A. Once we obtain this distributions, we can compute $P(\bar y>1.5|y)$, which is the probability of a dog starting with a 0.6 level of adrenaline to get a 1.5 level during anesthesia A, through computing the mean of the distribution restricted to $\bar y>1.5$.
+
+- If the probability is greater than 0.05, then we must apply anesthesia B, but if its equal or lower, we can still apply anesthesia A.
+
+$$
+P(\bar y>1.5|y)>0.05 \thinspace \rightarrow \thinspace Apply \thinspace  \thinspace B
+$$
+
+Now, to obtain a crieterion mathematically, we can integrate. Using the density function of $N(0.6+\beta_0+\beta_1,\sigma)$ and the one from the posterior distribution $\pi(\beta_0,\beta_1,\sigma)$, we can integrate with respect to $\beta_0$,$\beta_1$ and $\sigma$, where the limits of integration are $\infty$ and $-\infty$ for $\beta_0$ and $\beta_1$, and $0$ and $1$ for $\sigma$, to obtain $p(\bar y > 1.5|y)$ (the desired probability).
+
+$$
+p(\bar y > 1.5|y)=\int_{-\infty}^\infty\int_{-\infty}^\infty\int_0^1 p_N(\bar y>1.5|0.6+\beta_0+\beta_1,\sigma,y)p_\pi(\beta_0,\beta_1,\sigma|y)d\beta_0d\beta_1d\sigma
+$$
+
+Once this integral is computed, one can obtain the probability that a dog stariting with a level 0.6 of adrenaline has more than a 1.5 level during the application of anesthesia A. Hence, one can decide to use anesthesia B if the probability is higher than 0.05, while one can keep anesthesia A if it is equal or lower.
+
+$$
+p(\bar y > 1.5|y)>0.05 \thinspace \rightarrow \thinspace Apply \thinspace  \thinspace B
+$$
+
+We would recommend to use the computational method, however, because all distributions and data needed are already implemented in the computer used and the computation of the integrals are relatively difficult or time consuming.

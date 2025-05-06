@@ -1,0 +1,125 @@
+---
+title: 'Session 10: States and Parameters Estimation via Kalman Filter + Newton Raphson/EM'
+Date: "4/30/2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+#  Global warming
+
+Data come from the website:
+
+http://data.giss.nasa.gov/gistemp/
+
+The GISS Surface Temperature Analysis (GISTEMP) is an estimate of global surface temperature change. Graphs and tables are updated around the middle of every month using current data files from NOAA GHCN v3 (meteorological stations), ERSST v5 (ocean areas), and SCAR (Antarctic stations), combined as described in our December 2010 publication (Hansen et al. 2010).
+
+### Read data
+
+```{r}
+gtemp1=ts(c(t(as.matrix(read.csv2("GLB.Ts.csv")[,-1]))),start=c(1880,1),freq=12)
+gtemp2=ts(c(t(as.matrix(read.csv2("GLB.Ts+dSST.csv")[,-1]))),start=c(1880,1),freq=12)
+
+gtemp1=window(gtemp1,start=1910,end=2018)
+gtemp2=window(gtemp2,start=1910,end=2018)
+
+```
+
+```{r}
+plot(gtemp1,ylim=c(-1,1.5))
+lines(gtemp2,col=2)
+legend("topleft",col=c(1:2),lty=1,lwd=2,legend=c("GLB.Ts","GLB.Ts+dSST"))
+
+```
+
+
+```{r}
+plot(gtemp1,gtemp2,xlab="GLB.Ts",ylab="GLB.Ts+dSST",xlim=c(-1,2),ylim=c(-1,2))
+abline(c(0,1))
+```
+
+```{r}
+library(astsa)
+```
+
+## A) Non-linear Optimization
+
+```{r}
+y=matrix(cbind(gtemp1,gtemp2),nc=2)
+A=array(1,dim=c(2,1,nrow(y)))
+mu0=0
+Sigma0=10
+Phi=1
+cQ=0.1
+cR=0.1*diag(2)
+
+Linn=function(par){
+  Phi=par[1]
+  cQ=par[2]
+  cR=t(matrix(c(par[3],0,0,par[4]),ncol=2))
+  kf=Kfilter(y, A, mu0, Sigma0, Phi, cQ, cR)
+  kf$like
+}
+```
+```{r}
+initpar=(c(1,0.1,0.1,0.1))
+(sol=optim(initpar,Linn,NULL,method="BFGS",hessian=TRUE,
+           control=list(maxit = 800, reltol = 1e-4)))
+stderr=sqrt(diag(solve(sol$hessian)))
+cbind(sol$par,stderr)
+```
+
+```{r}
+(Phi=sol$par[1])
+cQ=sol$par[2]
+cR=matrix(c(sol$par[3],0,0,sol$par[4]),ncol=2)
+(t(cQ)%*%cQ)
+(S=t(cR)%*%cR)
+
+kf=Ksmooth(y, A, mu0, Sigma0, Phi, cQ, cR)
+
+pre=ts(c(unlist(kf$Xp)),start=c(1910,1),freq=12)
+fil=ts(c(unlist(kf$Xf)),start=c(1910,1),freq=12)
+smo=ts(c(unlist(kf$Xs)),start=c(1910,1),freq=12)
+
+xlim1=c(1910,2018)
+plot(gtemp1,ylim=c(-1.5,2),xlim=xlim1)
+lines(gtemp2,col=2)
+lines(smo,col=4,lwd=2)
+abline(h=0)
+```
+
+## B) EM algorithm
+
+```{r}
+num=length(gtemp1)
+y=matrix(cbind(gtemp1,gtemp2),nc=2)
+A=array(1,dim=c(2,1,nrow(y)))
+mu0=0
+Sigma0=100
+Phi=1
+cQ=0.05
+cR=diag(c(0.1,0.1))
+(sol2=EM(y, A, mu0, Sigma0, Phi, cQ, cR, max.iter = 800, tol = 1e-8))
+
+
+Phi=sol2$Phi
+cQ=chol(sol2$Q)
+cR=chol(sol2$R)
+mu0=sol2$mu0
+Sigma0=sol2$Sigma0
+kf=Ksmooth(y, A, mu0, Sigma0, Phi, cQ, cR)
+
+pre=ts(c(unlist(kf$Xp)),start=c(1910,1),freq=12)
+fil=ts(c(unlist(kf$Xf)),start=c(1910,1),freq=12)
+smo=ts(c(unlist(kf$Xs)),start=c(1910,1),freq=12)
+
+par(mfrow=c(2,1),mar=c(3,3,1,1))
+xlim1=c(1910,2018)
+plot(gtemp1,ylim=c(-1.5,2),xlim=xlim1)
+lines(smo,col=4,lwd=2)
+plot(gtemp2,ylim=c(-1.5,2),xlim=xlim1,col=2)
+lines(smo,col=4,lwd=2)
+```
+
+

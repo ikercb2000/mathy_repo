@@ -1,0 +1,170 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+## Employment in Trade, Transportation and Hotels in Spain (thousands persons)
+
+Data come from the website:
+
+####Source: http://www.ine.es/  Economia / Cuentas Economicas / Contabilidad Nacional Trimestral  / Contabilidad Nacional Trimestral / Empleo / Empleo por ramas de actividad / Ocupaci?n en Comercio, Transporte y Hosteler?a
+
+People employed in the Trade, Transportation and Hotels sector
+
+http://www.ine.es/jaxiT3/Tabla.htm?t=28607&L=0
+
+### Read the two quarterly time series (the original one and the seasonally adjusted)
+```{r}
+serieTot=ts(read.table("OcupCTH.dat"),start=1995,freq=4)
+plot(serieTot)
+```
+
+###Work with the original series, transformed into logarithm
+```{r}
+serie=log(serieTot[,1])
+plot(serie)
+```
+
+###Seasonality analysis
+```{r}
+monthplot(serie)
+```
+
+### Decomposition of the time series
+```{r}
+plot(decompose(serie))
+```
+
+###Load the package astsa
+```{r}
+library(astsa)
+```
+
+## Estimation of the local trend + non-constant seasonality model
+```{r}
+ser=serie
+N=length(ser)
+y=matrix(ser,ncol=1)
+A=matrix(c(1,0,1,0,0),nr=1)
+Phi=matrix(c(1,0,0,0,0,1,1,0,0,0,0,0,-1,1,0,0,0,-1,0,1,0,0,-1,0,0),ncol=5)
+Phi
+
+Linn=function(para){
+  cQ1=para[1]    
+  cQ2=para[2]   
+  cQ3=para[3]   
+  cR=para[4]  
+  cQ=diag(c(cQ1,cQ2,cQ3,0,0))
+  kf=Kfilter(y,A,mu0,Sigma0,Phi,cQ,cR)
+  return(kf$like)
+}
+
+mu0=c(y[1],rep(0,4))
+Sigma0=diag(rep(0.1,5))
+
+initpar=c(0.01,0.01,0.01,0)
+
+est=optim(initpar,Linn,NULL,method="BFGS",hessian=TRUE)
+stderr=sqrt(diag(solve(est$hessian)))
+est      
+cbind(est$par,stderr)
+```
+
+```{r}
+para=est$par
+cQ1=para[1]   # sigma_w1
+cQ2=para[2]   # sigma_w2
+cQ3=para[3]   # sigma_w3
+cR=para[4]    # sigma de R
+cQ=diag(c(cQ1,cQ2,cQ3,0,0))
+```
+
+```{r}
+## variance-covariance matrix for the transition error
+(Q=t(cQ)%*%cQ)
+## variance for the observation error
+(R=t(cR)%*%cR)
+
+c(diag(Q)[1:3],R)
+
+#Que fa?
+(m<-StructTS(ser))
+
+fitted(m)
+plot(fitted(m))
+```
+
+###Kalma Filter to obtain the smoothing estimation of the components
+```{r}
+kf=Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)   
+
+smo=ts(data.frame(level=unlist(kf$Xs)[1+(0:95)*5],slope=unlist(kf$Xs)[2+(0:95)*5],seasonal=unlist(kf$Xs)[3+(0:95)*5]),start=1995,freq=4)
+plot(smo)
+```
+### Extraction of the trend
+```{r}
+par(mar=c(3,3,2,2),mfrow=c(2,1))
+plot(smo[,"level"]+smo[,"seasonal"],col=1)
+lines(smo[,"level"],col=2)
+plot(smo[,"slope"])
+abline(h=0)
+```
+```{r}
+plot(stl(serie,s.window=4))
+
+```
+
+###Comparison with the standard procedure
+```{r}
+modstl=stl(serie,s.window=4)
+par(mfrow=c(2,1),mar=c(3,3,1,1))
+
+plot(modstl$time.series[,2]+modstl$time.series[,3])
+lines(smo[,"level"],col=2)
+
+plot(stl(serie,s.window=4)$time.series[,1])
+lines(smo[,"seasonal"],col=2)
+
+par(mfrow=c(1,1))
+cbind(stl=stl(serie,s.window=4)$time.series[,2]+stl(serie,s.window=4)$time.series[,3],smo[,"level"])
+
+```
+### Seasonally adjusted series comparison
+```{r}
+serofi=serieTot[,2]
+serkf=exp(y-smo[,"seasonal"])
+serstl=exp(modstl$time.series[,2]+modstl$time.series[,3])
+plot(serofi)
+lines(serkf,col=2)
+lines(serstl,col=4)
+legend("topleft",legend=c("Ofi","KF","STL"),lty=1,col=c(1,2,4))
+
+```
+```{r}
+serofi=serieTot[,2]
+serkf=exp(y-smo[,"seasonal"])
+serstl=exp(modstl$time.series[,2]+modstl$time.series[,3])
+plot(serofi,xlim=c(2011,2019),ylim=c(5200,6100),type="o")
+lines(serkf,col=2)
+lines(serstl,col=4)
+legend("bottomleft",legend=c("Ofi","KF","STL"),lty=1,col=c(1,2,4))
+
+```
+```{r}
+cbind(serofi,serkf,serstl)
+
+pairs(as.data.frame(cbind(serofi,serkf,serstl)),lower.panel=NULL)
+
+
+```
+
+
+```{r}
+cor(cbind(serofi,serkf,serstl))
+```
+
+
+
+

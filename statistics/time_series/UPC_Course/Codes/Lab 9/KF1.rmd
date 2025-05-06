@@ -1,0 +1,257 @@
+## Model 1: AR(1)+Noise
+
+```{r}
+library(astsa)
+set.seed(12345)
+
+### Model: AR(1)+Noise
+phi=0.9
+W<-0.1
+V<-1
+n=200
+
+x<-ts(arima.sim(n,model=list(ar=phi),sd=sqrt(W)))
+y<-ts(x+rnorm(n,mean=0,sd=sqrt(V)))
+sim1<-data.frame(x,y)
+
+plot(sim1$y,main=paste("V:",V,"  W:",W),type="l")
+lines(sim1$x,col="red",lwd=2)
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(sim1$y,ylim=c(-1,1),lag.max=40,lwd=2)
+pacf(sim1$y,ylim=c(-1,1),lag.max=40,lwd=2)
+par(mfrow=c(1,1))
+```
+
+```{r}
+(sim1.arima<-arima(sim1$y,order=c(1,0,1)))
+```
+```{r}
+##Residuals to verify the distribution 
+res<-resid(sim1.arima)
+
+par(mfrow=c(2,2))
+#Residuals plot
+plot(res,main="Residuals")
+abline(h=0)
+abline(h=c(-3*sd(res),3*sd(res)),lty=3,col=4)
+#Square Root of absolute values of residuals (Homocedasticity)
+scatter.smooth(sqrt(abs(res)),main="Square Root of Absolute residuals",
+               lpars=list(col=2))
+
+#Normal plot of residuals
+qqnorm(res)
+qqline(res,col=2,lwd=2)
+
+##Histogram of residuals with normal curve
+hist(res,breaks=20,freq=F)
+curve(dnorm(x,mean=mean(res),sd=sd(res)),col=2,add=T)
+par(mfrow=c(1,1))
+```
+```{r}
+
+par(mfrow=c(1,2))
+acf(sim1.arima$resid,ylim=c(-1,1),lag.max=40,lwd=2)
+pacf(sim1.arima$resid,ylim=c(-1,1),lag.max=40,lwd=2)
+par(mfrow=c(1,1))
+
+```
+
+```{r}
+# matrix of observations (nx1)
+y=matrix(sim1$y,nc=1)
+# Constant Matrix for the Observation Equation: Y=A*X+V
+A=1
+# Inital Values for the Kalman Filter: gaussian a priori distribution X0|0~N(mu0=0,Sigma0=10000) 
+mu0=0
+Sigma0=1000
+# Parametres for the model: 
+# Constant Matrix for the Transition Equation: Phi
+# Cholesky descomposition (~sqrt) of Variance matrix of Trans.Eq.: cQ
+# Cholesky descomposition (~sqrt) of Variance matrix of Obs.Eq.: cR
+## Aplication of Kalman Filter with the maximum Likelihood estimates of the parameters
+
+Phi=phi
+cQ=sqrt(W)
+cR=sqrt(V)
+
+y.kalman<-Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)
+
+```
+
+
+
+```{r}
+# Predictions from the kalman Filter
+pre.mu<-c(y.kalman$Xp)
+plot(sim1$y,type="p",main="Predictions")
+lines(sim1$x,lwd=2)
+lines(pre.mu,col=2,lwd=2)
+pre.se<-c(y.kalman$Pp)
+lines(pre.mu-1.96*sqrt(pre.se),col=4,lty=3,lwd=1)
+lines(pre.mu+1.96*sqrt(pre.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Prediction"),lty=c(1,1),col=c(1,2))
+```
+```{r}
+# Filtering from the kalman Filter
+fil.mu<-c(y.kalman$Xf)
+plot(sim1$y,type="p",main="Filter")
+lines(sim1$x,lwd=2)
+lines(fil.mu,col=2,lwd=2)
+fil.se<-c(y.kalman$Pf)
+lines(fil.mu-1.96*sqrt(fil.se),col=4,lty=3,lwd=1)
+lines(fil.mu+1.96*sqrt(fil.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Filter"),lty=c(1,1),col=c(1,2))
+```
+
+```{r}
+# Smoothing from the kalman Filter
+
+smo.mu<-c(y.kalman$Xs)
+plot(sim1$y,type="p",main="Smoothing")
+lines(sim1$x,lwd=2)
+lines(smo.mu,col=2,lwd=2)
+smo.se<-c(y.kalman$Ps)
+lines(smo.mu-1.96*sqrt(smo.se),col=4,lty=3,lwd=1)
+lines(smo.mu+1.96*sqrt(smo.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Smoothing"),lty=c(1,1),col=c(1,2))
+```
+
+## Model 2: Random Walk+Noise
+
+```{r}
+
+set.seed(12345)
+
+### Model: Random Walk+Noise
+phi=1
+W<-0.1
+V<-1
+n=200
+
+x<-ts(cumsum(rnorm(n,mean=0,sd=sqrt(W))))
+y<-ts(x+rnorm(n,mean=0,sd=sqrt(V)))
+sim2<-data.frame(x,y)
+
+plot(sim2$y,main=paste("V:",V,"  W:",W),type="l")
+lines(sim2$x,col="red",lwd=2)
+```
+
+
+
+
+```{r}
+par(mfrow=c(1,2))
+acf(sim2$y,ylim=c(-1,1),lag.max=40,lwd=2)
+pacf(sim2$y,ylim=c(-1,1),lag.max=40,lwd=2)
+par(mfrow=c(1,1))
+```
+
+
+```{r}
+
+(sim2.arima<-arima(sim2$y,order=c(0,1,1)))
+```
+```{r}
+##Residuals to verify the distribution 
+res<-resid(sim2.arima)
+
+par(mfrow=c(2,2))
+#Residuals plot
+plot(res,main="Residuals")
+abline(h=0)
+abline(h=c(-3*sd(res),3*sd(res)),lty=3,col=4)
+#Square Root of absolute values of residuals (Homocedasticity)
+scatter.smooth(sqrt(abs(res)),main="Square Root of Absolute residuals",
+               lpars=list(col=2))
+
+#Normal plot of residuals
+qqnorm(res)
+qqline(res,col=2,lwd=2)
+
+##Histogram of residuals with normal curve
+hist(res,breaks=20,freq=F)
+curve(dnorm(x,mean=mean(res),sd=sd(res)),col=2,add=T)
+par(mfrow=c(1,1))
+```
+
+
+
+
+
+```{r}
+
+par(mfrow=c(1,2))
+acf(sim2.arima$resid,ylim=c(-1,1),lag.max=40,lwd=2)
+pacf(sim2.arima$resid,ylim=c(-1,1),lag.max=40,lwd=2)
+par(mfrow=c(1,1))
+
+```
+
+```{r}
+
+# matrix of observations (nx1)
+y=matrix(sim2$y,nc=1)
+# Constant Matrix for the Observation Equation: Y=A*X+V
+A=1
+# Inital Values for the Kalman Filter: gaussian a priori distribution X0|0~N(mu0=0,Sigma0=10000) 
+mu0=0
+Sigma0=1000
+# Parametres for the model: 
+# Constant Matrix for the Transition Equation: Phi
+# Cholesky descomposition (~sqrt) of Variance matrix of Trans.Eq.: cQ
+# Cholesky descomposition (~sqrt) of Variance matrix of Obs.Eq.: cR
+## Aplication of Kalman Filter with the maximum Likelihood estimates of the parameters
+
+Phi=phi
+cQ=sqrt(W)
+cR=sqrt(V)
+
+y.kalman<-Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)
+
+```
+
+
+
+
+
+
+
+```{r}
+# Predictions from the kalman Filter
+pre.mu<-c(y.kalman$Xp)
+plot(sim2$y,type="p",main="Predictions")
+lines(sim2$x,lwd=2)
+lines(pre.mu,col=2,lwd=2)
+pre.se<-c(y.kalman$Pp)
+lines(pre.mu-1.96*sqrt(pre.se),col=4,lty=3,lwd=1)
+lines(pre.mu+1.96*sqrt(pre.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Prediction"),lty=c(1,1),col=c(1,2))
+```
+```{r}
+# Filtering from the kalman Filter
+fil.mu<-c(y.kalman$Xf)
+plot(sim2$y,type="p",main="Filter")
+lines(sim2$x,lwd=2)
+lines(fil.mu,col=2,lwd=2)
+fil.se<-c(y.kalman$Pf)
+lines(fil.mu-1.96*sqrt(fil.se),col=4,lty=3,lwd=1)
+lines(fil.mu+1.96*sqrt(fil.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Filter"),lty=c(1,1),col=c(1,2))
+```
+
+```{r}
+# Smoothing from the kalman Filter
+
+smo.mu<-c(y.kalman$Xs)
+plot(sim2$y,type="p",main="Smoothing")
+lines(sim2$x,lwd=2)
+lines(smo.mu,col=2,lwd=2)
+smo.se<-c(y.kalman$Ps)
+lines(smo.mu-1.96*sqrt(smo.se),col=4,lty=3,lwd=1)
+lines(smo.mu+1.96*sqrt(smo.se),col=4,lty=3,lwd=1)
+legend("topleft",legend=c("State","Smoothing"),lty=c(1,1),col=c(1,2))
+```

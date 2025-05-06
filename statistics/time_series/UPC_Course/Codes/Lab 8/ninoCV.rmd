@@ -1,0 +1,116 @@
+---
+title: "EL NIÑO "
+output:
+  html_document: default
+
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+ser=ts(read.csv("nino3.csv",header=F),start=1950,freq=12)
+plot(ser)
+```
+
+## EL NIÑO
+
+These data constitutes of Nino Region 3 SST indices.The measurements are given in degrees Celsius. The Nino 3 Region is bounded by 90W-150W and 5S-5N.
+
+http://www.cpc.ncep.noaa.gov/data/indices/
+
+
+```{r, include=FALSE}
+measures=function(pred,obs){
+  
+  err=pred-obs
+  perr=err/pred
+  
+  c(RMSE=sqrt(mean(err^2)),
+    MAE=mean(abs(err)),
+    nRMSE=sqrt(mean(err^2))/mean(obs),
+    nMAE=mean(abs(err))/mean(obs),
+    RMSPE=sqrt(mean(perr^2)),
+    MAPE=mean(abs(perr)))
+}
+```
+
+
+```{r}
+serieTot=ser
+
+library(neuralnet)
+m=24
+ny=1
+mi=min(serieTot)*0.9
+ma=max(serieTot)*1.1
+
+dades=serieTot
+for (i in 1:m){
+  dades=ts.intersect(dades,lag(serieTot,-i))
+}
+dades=as.data.frame(dades)
+names(dades)=paste0("y",c("",paste0("_",1:m)))
+dades=(dades-mi)/(ma-mi)
+
+set.seed(123456)
+kf=10
+
+resp="y"
+if(ny>1) resp=paste0(resp,c("",paste0("_",1:(ny-1))),collapse="+")
+expl=paste0("y_",ny:m, collapse = "+")
+f <- as.formula(paste0(resp, "~",expl))
+
+me.train=matrix(NA,nr=kf,nc=6)
+me.test=matrix(NA,nr=kf,nc=6)
+
+idx=sample(1:kf,nrow(dades),replace=T)
+
+for (i in 1:kf){
+  train=as.matrix(dades[idx!=i,])
+  test=as.matrix(dades[idx==i,])
+
+  net <- neuralnet(f, train, lifesign="none",lifesign.step =500,hidden = c(6,6),rep=1, threshold=0.002) 
+  #plot(net)
+
+pred.train=mi+compute(net,train[,-c(1:ny)])$net.result*(ma-mi)
+pred.test=mi+compute(net,test[,-c(1:ny)])$net.result*(ma-mi)
+obs.train=mi+train[,1:ny]*(ma-mi)
+obs.test=mi+test[,1:ny]*(ma-mi)
+
+  (me.train[i,]=measures(pred.train,obs.train))
+  (me.test[i,]=measures(pred.test,obs.test))
+}
+me.train
+me.test
+```
+
+```{r}
+colnames(me.train)=c("RMSE","MAE","nRMSE","nMAE","RMSPE","MAPE")
+colnames(me.test)=c("RMSE","MAE","nRMSE","nMAE","RMSPE","MAPE")
+summary(me.train)
+summary(me.test)
+cbind(
+apply(me.train,2,function(el) mean(el)-1.96*sd(el)/sqrt(kf)),
+apply(me.train,2,function(el) mean(el)+1.96*sd(el)/sqrt(kf)),
+apply(me.test,2,function(el) mean(el)-1.96*sd(el)/sqrt(kf)),
+apply(me.test,2,function(el) mean(el)+1.96*sd(el)/sqrt(kf))
+)
+
+```
+
+```{r}
+nam=c("RMSE","MAE" ,"nRMSE","nMAE","RMSPE","MAPE")
+par(mfrow=c(2,3))
+for (i in 1:6){
+  maxi=max(me.train[,i],me.test[,i],na.rm=T)*1.25
+  mini=min(me.train[,i],me.test[,i],na.rm=T)*0.75
+  plot(me.train[,i],type="l",ylim=c(mini,maxi),main=nam[i])
+  lines(me.test[,i],col=2)
+  legend("topleft",legend=c("Train","Test"),col=1:2,lty=1)
+}
+
+
+```
+

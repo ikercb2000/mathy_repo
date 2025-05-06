@@ -1,0 +1,233 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+##  Sea Surface Height (cm) in BCN (Lon 2-Lat 41)
+## http://sealevel.colorado.edu/content/interactive-sea-level-time-series-wizard?dlon=2&dlat=41&fit=s&smooth=n&days=60
+
+```{r}
+serie=ts(read.table("sealevelBCN17.dat",dec=".")[,2],start=c(1992,35),freq=36)
+plot(serie,main="Sea Surface Height (cm) Anomalies")
+abline(h=0)
+```
+
+```{r}
+#### PART 1: AR(1)+NOISE
+
+### ACF/PACF for Observations
+par(mfrow=c(1,2))
+acf(serie,lag.max=7*12,ylim=c(-1,1))
+pacf(serie,lag.max=7*12,ylim=c(-1,1))
+par(mfrow=c(1,1))
+```
+
+```{r}
+(mod=arima(serie,order=c(1,0,1),include.mean=F))
+```
+
+
+```{r}
+
+library(astsa)
+
+
+# matrix of observations (nx1)
+y=matrix(serie,nc=1)
+# Constant Matrix for the Observation Equation: Y=A*X+V
+A=1
+# Inital Values for the Kalman Filter: gaussian a priori distribution X0|0~N(mu0=0,Sigma0=10000) 
+mu0=0
+Sigma0=10000
+# Parametres for the model: 
+# Constant Matrix for the Transition Equation: Phi
+# Cholesky descomposition (~sqrt) of Variance matrix of Trans.Eq.: cQ
+# Cholesky descomposition (~sqrt) of Variance matrix of Obs.Eq.: cR
+## Aplication of Kalman Filter with the maximum Likelihood estimates of the parameters
+
+Phi=0.8206793
+cQ=1.7563863
+cR=2.9250275
+
+y.kalman<-Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)
+
+(AIC=2*y.kalman$like+2*3)
+```
+
+
+```{r}
+
+# Predictions from the kalman Filter
+pre.mu<-ts(c(y.kalman$Xp),start=c(1992,35),freq=36)
+plot(serie,main="Predictions")
+lines(pre.mu,col=2,lwd=2)
+pre.se<-ts(c(y.kalman$Pp)[-1],start=c(1992,35),freq=36)
+lines(ts(pre.mu-1.96*sqrt(pre.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(pre.mu+1.96*sqrt(pre.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+```
+
+```{r}
+# Filtering from the kalman Filter
+filt.mu<-ts(c(y.kalman$Xf)[-1],start=c(1992,35),freq=36)
+plot(serie, main="Filter")
+lines(filt.mu,col=2,lwd=2)
+filt.se<-ts(c(y.kalman$Pf)[-1],start=c(1992,35),freq=36)
+lines(ts(filt.mu-1.96*sqrt(filt.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(filt.mu+1.96*sqrt(filt.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+```
+
+```{r}
+# Smoothing from the kalman Filter
+smo.mu<-ts(c(y.kalman$Xs)[-1],start=c(1992,35),freq=36)
+plot(serie,main="Smoothing")
+lines(smo.mu,col=2,lwd=2)
+smo.se<-ts(c(y.kalman$Ps)[-1],start=c(1992,35),freq=36)
+lines(ts(smo.mu-1.96*sqrt(smo.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(smo.mu+1.96*sqrt(smo.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+```
+```{r}
+##Residuals of the model: Observations - Predictions for Y from the Kalman Filter
+res<-ts(y-pre.mu)
+
+par(mfrow=c(2,2))
+#Residuals plot
+plot(res,main="Residuals")
+abline(h=0)
+abline(h=c(-3*sd(res),3*sd(res)),lty=3,col=4)
+#Square Root of absolute values of residuals (Homocedasticity)
+scatter.smooth(sqrt(abs(res)),main="Square Root of Absolute residuals",
+               lpars=list(col=2))
+
+#Normal plot of residuals
+qqnorm(res)
+qqline(res,col=2,lwd=2)
+
+##Histogram of residuals with normal curve
+hist(res,breaks=20,freq=F)
+curve(dnorm(x,mean=mean(res),sd=sd(res)),col=2,add=T)
+par(mfrow=c(1,1))
+```
+
+```{r}
+#ACF & PACF of residuals
+s=36
+par(mfrow=c(1,2))
+acf(res,ylim=c(-1,1),lag.max=120,col=c(2,rep(1,s-1)),lwd=1)
+pacf(res,ylim=c(-1,1),lag.max=120,col=c(rep(1,s-1),2),lwd=1)
+par(mfrow=c(1,1))
+```
+
+```{r}
+#ACF & PACF of square residuals 
+par(mfrow=c(1,2))
+acf(res^2,ylim=c(-1,1),lag.max=120,col=c(2,rep(1,s-1)),lwd=1)
+pacf(res^2,ylim=c(-1,1),lag.max=120,col=c(rep(1,s-1),2),lwd=1)
+par(mfrow=c(1,1))
+```
+```{r}
+shapiro.test(res)
+```
+
+```{r}
+
+### PART 2: RANDOM WALK+NOISE
+
+### ACF/PACF for Observations
+par(mfrow=c(1,2))
+acf(diff(serie),lag.max=7*12,ylim=c(-1,1))
+pacf(diff(serie),lag.max=7*12,ylim=c(-1,1))
+par(mfrow=c(1,1))
+```
+
+```{r}
+(mod=arima(serie,order=c(0,1,1)))
+```
+
+```{r}
+
+
+Phi=1
+cQ=0.6353734
+cR=3.4511333
+
+y.kalman<-Ksmooth(y,A,mu0,Sigma0,Phi,cQ,cR)
+
+(AIC=2*y.kalman$like+2*2)
+```
+
+```{r}
+
+# Predictions from the kalman Filter
+pre.mu<-ts(c(y.kalman$Xp),start=c(1992,35),freq=36)
+plot(serie,main="Predictions")
+lines(pre.mu,col=2,lwd=2)
+pre.se<-ts(c(y.kalman$Pp)[-1],start=c(1992,35),freq=36)
+lines(ts(pre.mu-1.96*sqrt(pre.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(pre.mu+1.96*sqrt(pre.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+```
+
+```{r}
+# Filtering from the kalman Filter
+filt.mu<-ts(c(y.kalman$Xf)[-1],start=c(1992,35),freq=36)
+plot(serie, main="Filter")
+lines(filt.mu,col=2,lwd=2)
+filt.se<-ts(c(y.kalman$Pf)[-1],start=c(1992,35),freq=36)
+lines(ts(filt.mu-1.96*sqrt(filt.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(filt.mu+1.96*sqrt(filt.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+```
+
+```{r}
+# Smoothing from the kalman Filter
+smo.mu<-ts(c(y.kalman$Xs)[-1],start=c(1992,35),freq=36)
+plot(serie,main="Smoothing")
+lines(smo.mu,col=2,lwd=2)
+smo.se<-ts(c(y.kalman$Ps)[-1],start=c(1992,35),freq=36)
+lines(ts(smo.mu-1.96*sqrt(smo.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+lines(ts(smo.mu+1.96*sqrt(smo.se),start=c(1992,35),freq=36),col=4,lty=3,lwd=1)
+abline(h=0)
+```
+
+```{r}
+##Residuals of the model: Observations - Predictions for Y from the Kalman Filter
+res<-ts(y-pre.mu)
+
+par(mfrow=c(2,2))
+#Residuals plot
+plot(res,main="Residuals")
+abline(h=0)
+abline(h=c(-3*sd(res),3*sd(res)),lty=3,col=4)
+#Square Root of absolute values of residuals (Homocedasticity)
+scatter.smooth(sqrt(abs(res)),main="Square Root of Absolute residuals",
+               lpars=list(col=2))
+
+#Normal plot of residuals
+qqnorm(res)
+qqline(res,col=2,lwd=2)
+
+##Histogram of residuals with normal curve
+hist(res,breaks=20,freq=F)
+curve(dnorm(x,mean=mean(res),sd=sd(res)),col=2,add=T)
+par(mfrow=c(1,1))
+```
+
+
+```{r}
+#ACF & PACF of residuals
+s=36
+par(mfrow=c(1,2))
+acf(res,ylim=c(-1,1),lag.max=120,col=c(2,rep(1,s-1)),lwd=1)
+pacf(res,ylim=c(-1,1),lag.max=120,col=c(rep(1,s-1),2),lwd=1)
+par(mfrow=c(1,1))
+```
+
+```{r}
+#ACF & PACF of square residuals 
+par(mfrow=c(1,2))
+acf(res^2,ylim=c(-1,1),lag.max=120,col=c(2,rep(1,s-1)),lwd=1)
+pacf(res^2,ylim=c(-1,1),lag.max=120,col=c(rep(1,s-1),2),lwd=1)
+par(mfrow=c(1,1))
+```
+
+```{r}
+shapiro.test(res)
+```

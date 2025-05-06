@@ -1,0 +1,156 @@
+---
+title: "Assignment 2 Statistical Learning"
+author: "Miguel Benítez, Iker Caballero, Alejandro Peraza"
+date: "2023-02-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Lasso for the Boston Housing data
+
+### Exercise 1)
+
+The first step is tto create the $X$ input matrix (with the 13 variables) and the $Y$ vector for training and validation. Hence, we first import the data and get the relevant data from the data frame.
+
+```{r,echo=FALSE}
+load("/Users/ikercaballerobragagnini/Downloads/boston.Rdata")
+
+# From the boston.c data frame, we just use the 14 variables we will work with
+data <- cbind(boston.c[,7],boston.c[,8:20])
+colnames(data) <- c("CMEDV",names(boston.c[,8:20]))
+```
+
+Now we can divide the data:
+
+```{r}
+# As there is no indicator for training and validation, we extract a sample of 70% of total observations and use it as training sample
+set.seed(123)
+train_ind <- sample(nrow(data),nrow(data)*0.7)
+train_s <- data[train_ind,]
+val_s <- data[-train_ind,]
+
+# We then create Y and X for both sets of data
+y_train <- scale(train_s[,"CMEDV"],center=T,scale=F)
+y_val <- scale(val_s[,"CMEDV"],center=T,scale=F)
+
+# We keep the factor out from the scaling procedure and then we add it again
+x_train <- scale(as.matrix(train_s[,-c(1,5)],center=T,scale=T))
+x_train <- cbind(x_train,train_s[,5])
+colnames(x_train)[13] <- c("CHAS")
+x_val <- scale(as.matrix(val_s[,-c(1,5)],center=T,scale=T))
+x_val <- cbind(x_val,val_s[,5])
+colnames(x_val)[13] <- c("CHAS")
+
+# Because the factor variable levels have changed (from 0 & 1 to 1 & 2) while reincorporating the factor, we replace the values for the original ones
+x_train[,13][x_train[,13]==1] <- 0
+x_train[,13][x_train[,13]==2] <- 1
+x_val[,13][x_val[,13]==1] <- 0
+x_val[,13][x_val[,13]==2] <- 1
+```
+
+Now that we have divided the data between 
+
+```{r}
+library("glmnet")
+
+# In the code they just use train_sample, so I do so (ESTO ES PA NOSOTROS, HAY QUE CAMBIARLO EN LA VERSION FINAL)
+lasso <- glmnet(x_train,y_train,standardize=FALSE,intercept=FALSE)
+cv.lasso <- cv.glmnet(x_train,y_train,standardize=FALSE,intercept=FALSE,nfolds=10)
+
+# Now we plot the different CV estimated prediction errors and get lambdas
+op <- par(mfrow=c(2,1))
+plot(cv.lasso)
+plot(lasso,xvar="lambda")
+abline(v=log(cv.lasso$lambda.min),col=2,lty=2)
+abline(v=log(cv.lasso$lambda.1se),col=2,lty=2)
+par(op)
+```
+
+In this plot we indicated the $\lambda$ that minimizes the CV prediction error and the one that is one standard deviation away from this latter lambda. To choose one for our final model we compare the sparsity of the coefficient vectors, and we finally choose $\lambda=\lambda_{1se}=0.2353759$ as it allows to eliminate coefficients that are near to zero. Hence, the model is the following:
+
+```{r}
+coef_fin <- coef(lasso,s=cv.lasso$lambda.1se) # Because it does the biggest reduction of coefficients
+colnames(coef_fin) <- "Coefficient"
+coef_fin# Poner que aquellos coeficientes muy pequeños no importan
+```
+
+As we can see here, the Lasso regression shrinks to zero some of the coefficients for the variables. The only variables that seem relevant when explaining the corrected median value of houses in Boston are CRIM, RM, DIS, PTRATIO, B and LSTAT. The most important ones out of these seem to be RM, which has a positive effect, PTRATIO and LSTAT, both having a negative effect.
+
+For the other variables we can see that, even if the magnitude is not fully interpretable, they do not seem to be very important as they are near zero. For these, CRIM and DIS have a slightly negative effect, while B has a slightly positive effect. As we highlighted in assignment 1, the effect of B has no clear-cut explanation, while the other effects have trivial explanations.
+
+### Exercise 2)
+
+In order to estimate a ridge regression for our data, we can use the same glmnet package but fixing $\alpha=0$, so that the elastic net (the penalization that this package uses) is the $L_2$ penalization.
+
+```{r}
+ridge <- glmnet(x_train,y_train,alpha=0,standardize=FALSE,intercept=FALSE)
+cv.ridge <- cv.glmnet(x_train,y_train,standardize=FALSE,intercept=FALSE,nfolds=10)
+```
+
+Now that we have estimated our model and used 10-fold CV, we can compare the prediction error estimate with the one obtained by our version of the 10-fold CV. We first load the functions used in assignment 1:
+
+```{r,echo=FALSE}
+MSPE_val <- function(X, Y, X_val, Y_val, lambdas, plot=TRUE){
+  MSPE.val <- numeric(length(lambdas))
+  beta_path <- matrix(0, nrow=length(lambdas), ncol=ncol(X))
+  tX <- t(X)
+  XtX <- tX%*%X
+  for (l in seq_along(lambdas)){ 
+    lambda <- lambdas[l]
+    H_lambda_aux <- solve(XtX + lambda * diag(1,ncol(X))) %*% tX
+    beta_path[l,] <-  H_lambda_aux %*% Y
+  } 
+  for (l in seq_along(lambdas)) {
+    lambda <- lambdas[l]
+    Y_hat_val <- X_val %*% beta_path[l,]
+    MSPE.val[l] <- sum((Y_val - Y_hat_val) ^ 2) / nrow(X_val)
+  }
+  if (plot) {
+    plot(lambdas, MSPE.val)
+    plot(log(1+lambdas) - 1, MSPE.val)
+  }
+  return(MSPE.val)
+}
+
+MSPE_kCV = function(X,Y,k,lambdas,seed){
+  set.seed(seed)
+  indexes = matrix(0,nrow=dim(X)[1]/k,ncol=k)
+  numbers = 1:dim(X)[1]
+  for (i in 1:k){
+    ind = sample(numbers,dim(X)[1]/k,replace = FALSE)
+    indexes[,i] = ind
+    numbers = setdiff(numbers,ind)
+    }
+  MSPE_matrix = matrix(0,nrow=length(lambdas),ncol=k) 
+  for (i in 1:k){
+    training_X = X[indexes[,-i],]
+    test_X = X[indexes[,-i],]
+    training_Y = Y[indexes[,-i]]
+    test_Y = Y[indexes[,-i]]
+    MSPE_matrix[,i]=MSPE_val(training_X,training_Y,test_X,test_Y,lambdas=lambdas
+                             ,plot=FALSE)
+    }
+  lambdas_MSPE = apply(MSPE_matrix, MARGIN = 1, FUN = mean)
+  plot(log(lambdas), lambdas_MSPE,ylab="MSPE",xlab="Log(Lambda)")
+}
+```
+
+Now, we compare graphically and numerically the outcomes:
+
+```{r}
+lambdas_ridge <- cv.ridge$lambda
+# Compare the lambdas graphically
+op.r <- par(mfrow=c(2,1))
+plot(cv.ridge)
+MSPE_kCV(x_train,y_train,k=10,lambdas_ridge,123)
+# Compare the lambdas numerically through a matrix
+mat_lambdas <- matrix(c(lambdas_ridge[which.min(MSPE_kCV(x_train,y_train,k=10,lambdas_ridge,183))],cv.ridge$lambda.min,cv.ridge$lambda.1se),ncol=3)
+colnames(mat_lambdas)<- c("glmnet min","glmenet 1se","own function")
+rownames(mat_lambdas) <- c("Lambda")
+print(mat_lambdas)
+```
+
+We can clearly see that both graphs are very similar, but that the MSPE is lower for our function between a middle range of lambdas, showing then a steep increase in the MSPE for large values. This might be due to the fact that lambda is adapted for each fold in glmnet. However, the values of the lambda that produce the minimum values are the same, showing that using any of both functions will yield the same result.

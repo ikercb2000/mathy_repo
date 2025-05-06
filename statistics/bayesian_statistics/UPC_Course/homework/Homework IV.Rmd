@@ -1,0 +1,274 @@
+---
+title: "Bayes Hackaton"
+author: "Iker Caballero & Victor Jimenez"
+date: "2023-05-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+library(bayesplot)
+```
+
+# Data treatment
+
+```{r}
+load("BA2023.RData")
+head(df_train) # exploration
+sum(is.na(df_train)) # missing values
+
+df_train = df_train[,3:ncol(df_train)]
+df_test = df_test[,3:ncol(df_test)]
+```
+
+```{r}
+proportion.extremes <- function(x) {
+  lower = mean(x, na.rm = TRUE) - 3 * sd(x, na.rm = TRUE)
+  upper = mean(x, na.rm = TRUE) + 3 * sd(x, na.rm = TRUE)
+  return(list(lower, upper))
+}
+
+remove_extremes <- function(df) {
+  for (col in names(df)) {
+    if (is.numeric(df[[col]])) {
+      extreme_values <- df[[col]] < proportion.extremes(df[[col]])[[1]] | 
+        df[[col]] > proportion.extremes(df[[col]])[[2]]
+      proportion <- mean(extreme_values, na.rm = TRUE)
+      
+      cat("Proportion of outliers in", col, ":", round(proportion,3), "%\n")
+      df <- df[!extreme_values, ] # removes them
+    }
+  }
+  return(df)
+}
+df_train = remove_extremes(df_train)
+```
+
+Obtaining a subset for model comparison:
+
+```{r}
+df_train$sex = ifelse(df_train$sex == "H", 1, 0)
+df_test$sex = ifelse(df_test$sex == "H", 1, 0)
+
+# Now we scale training set for ridge regression
+# we also do not scale with sex because its a binary variable
+Y = scale(as.matrix(df_train[, c(10)]), center=TRUE, scale=FALSE) 
+Y = cbind(Y, as.matrix(df_train$categ, ncol=1))
+
+X = scale(as.matrix(df_train[,-c(1,10,11)]), center=TRUE, scale=TRUE)
+X = cbind(as.matrix(df_train$sex, ncol=1), X)
+
+Xtest = scale(as.matrix(df_test[,-c(1,10,11)]), center=TRUE, scale=TRUE) 
+Xtest = cbind(as.matrix(df_test$sex, ncol=1), Xtest)
+```
+
+```{r}
+# subset for train model comparison
+sample <- sample(c(TRUE, FALSE), nrow(X), replace=TRUE, prob=c(0.7,0.3))
+Xt  <- X[sample ,]
+Xv   <- X[!sample, ]
+Yt <- Y[sample ,]
+Yv <- Y[!sample ,]
+```
+
+# Classification
+
+```{r}
+# LASSO REGRESSION for classification
+library(glmnet) 
+lasso <- glmnet(Xt,Yt[,2], standardize=FALSE, intercept=FALSE, family="binomial", alpha=1)
+cv.lasso <- cv.glmnet(Xt,Yt[,2], standardize=FALSE, intercept=FALSE) # cross-validation
+lasso.opt <- glmnet(Xt,Yt[,2], standardize=FALSE, intercept=FALSE, family="binomial", alpha=1, lambda = cv.lasso$lambda.1se)
+lasso.opt$beta
+
+# Index of variables to consider:
+var_to_class = which(lasso.opt$beta!=0)
+Xtbayes = cbind(matrix(1, nrow=nrow(Xt), ncol=1), Xt[,var_to_class])
+Xvbayes = cbind(matrix(1, nrow=nrow(Xv), ncol=1), Xv[,var_to_class])
+```
+
+```{r}
+library(rstan)
+data_classification = list(
+  N = nrow(Xtbayes), 
+  k = length(var_to_class)+1,
+  X = Xtbayes,
+  y = Yt[,2],
+  Ntest = nrow(Xvbayes),
+  X_new = Xvbayes
+)
+
+fit_classification = stan("classification1.stan", data = data_classification, cores=4)
+print(fit_classification)
+```
+
+```{r}
+traceplot(fit_classification)
+```
+
+We observe that some variables do not converge after 500 iterations. The model takes long to converge.
+
+```{r}
+posterior = as.data.frame(fit_classification)
+bayesplot::mcmc_areas(posterior, pars=c("beta[1]"),prob=0.8)
+bayesplot::mcmc_areas(posterior, pars=c("beta[2]"),prob=0.8)
+bayesplot::mcmc_areas(posterior, pars=c("beta[3]"),prob=0.8)
+```
+
+And we make the prediction:
+
+```{r}
+ynew <- extract(fit_classification)$"y_new"
+prediction_estimates = round(apply(ynew,2,median))
+t = table(prediction_estimates, Yv[,2])
+print(t)
+acc = (t[1,1] + t[2,2])/nrow(Yv)
+cat("Accuracy: ", acc)
+```
+
+Now for the test dataset:
+
+```{r}
+# Full data
+X_bayes = cbind(matrix(1, nrow=nrow(X), ncol=1), X[,var_to_class])
+Xtest_bayes = cbind(matrix(1, nrow=nrow(Xtest), ncol=1), Xtest[,var_to_class])
+
+data_classification = list(
+  N = nrow(X_bayes), 
+  k = length(var_to_class)+1,
+  X = X_bayes,
+  y = Y[,2],
+  Ntest = nrow(Xtest_bayes),
+  X_new = Xtest_bayes
+)
+
+fit_classification = stan("classification1.stan", data = data_classification, cores=4)
+ynew <- extract(fit_classification)$"y_new"
+prediction_estimates = round(apply(ynew,2,median))
+save(prediction_estimates, file = "predclass.RData")
+```
+
+# Regression
+
+First model: repeat the same but with a model of regression.
+
+```{r}
+# LASSO REGRESSION
+lasso <- glmnet(Xt,Yt[,1], standardize=FALSE, intercept=FALSE, alpha=1)
+cv.lasso <- cv.glmnet(Xt,Yt[,1], standardize=FALSE, intercept=FALSE) # cross-validation
+lasso.opt <- glmnet(Xt,Yt[,1], standardize=FALSE, intercept=FALSE, alpha=1, lambda = cv.lasso$lambda.1se)
+lasso.opt$beta
+
+# Index of variables to consider:
+var_to_class = which(lasso.opt$beta!=0)
+Xtbayes = cbind(matrix(1, nrow=nrow(Xt), ncol=1), Xt[,var_to_class])
+Xvbayes = cbind(matrix(1, nrow=nrow(Xv), ncol=1), Xv[,var_to_class])
+```
+
+```{r}
+data_regression = list(
+  N = nrow(Xtbayes), 
+  k = length(var_to_class)+1,
+  X = Xtbayes,
+  y = Yt[,1],
+  Ntest = nrow(Xvbayes),
+  X_new = Xvbayes
+)
+
+fit_regression = stan("regression.stan", data = data_regression, cores=4)
+print(fit_regression)
+```
+
+```{r}
+traceplot(fit_regression)
+```
+
+```{r}
+posterior = as.data.frame(fit_regression)
+bayesplot::mcmc_areas(posterior, pars=c("beta[1]"),prob=0.8)
+bayesplot::mcmc_areas(posterior, pars=c("beta[2]"),prob=0.8)
+bayesplot::mcmc_areas(posterior, pars=c("beta[3]"),prob=0.8)
+```
+
+```{r}
+ynew <- extract(fit_regression)[["y_new"]]
+ppc_dens_overlay(y = Yv[,1], yrep = ynew)
+```
+
+```{r}
+prediction_estimates = round(apply(ynew,2,median))
+MAPE = (100/nrow(Yv))*sum(abs(Yv[,1] - prediction_estimates)/norm(as.matrix(Yv[,1])))
+MAPE
+```
+
+Now the same for the test dataset.
+
+```{r}
+# Full data
+X_bayes = cbind(matrix(1, nrow=nrow(X), ncol=1), X[,var_to_class])
+Xtest_bayes = cbind(matrix(1, nrow=nrow(Xtest), ncol=1), Xtest[,var_to_class])
+
+data_classification = list(
+  N = nrow(X_bayes), 
+  k = length(var_to_class)+1,
+  X = X_bayes,
+  y = Y[,1],
+  Ntest = nrow(Xtest_bayes),
+  X_new = Xtest_bayes
+)
+
+fit_regression = stan("regression.stan", data = data_regression, cores=4)
+ynew <- extract(fit_regression)[["y_new"]]
+prediction_estimates = round(apply(ynew,2,median))
+save(prediction_estimates, file = "predreg.RData")
+```
+
+# BRMS Regressions
+
+We also try to implement different regressions in BRMS, even though we had no time to use graphics for representation or other interesting procedures.
+
+```{r}
+library(brms)
+
+# Preprocessing
+
+str(df_train)
+
+df_train$cp_familia <- as.factor(df_train$cp_familia)
+df_train$sex <- as.factor(df_train$sex)
+df_train$any_acces <- as.factor(df_train$any_acces)
+df_train$any_estad <- as.factor(df_train$any_estad)
+
+df_test$cp_familia <- as.factor(df_test$cp_familia)
+df_test$sex <- as.factor(df_test$sex)
+df_test$any_acces <- as.factor(df_test$any_acces)
+df_test$any_estad <- as.factor(df_test$any_estad)
+
+# First Regression Model
+
+# In this first model we just use the typical approach of using all the X variables without regard.
+
+# We do not know anything about the possible distributions of the parameters, hence, we use non-informative priors for our model
+
+mod_norm_reg1 <- brm(formula=  nota_estad ~ sex + nota_access + any_acces + nota_inform + nota_termo + nota_graf + nota_mec + any_estad + n_matr_por_asig,data=df_train,family=gaussian(),warmup=1000,iter=2000,chains=4)
+
+MAPE1=sum(abs(df_test$nota_estad-predict(mod_norm_reg1,newdata=df_test))/nrow(df_test))
+
+
+# Second Regression Model
+
+# In this second approach we can tell that maybe the promotion has an effect on the grades obtained, as the grades for a same course could vary depending on the class (the year of entrance). As before we use the normal distribution and non-informative priors because we have no prior information of the possible distributions
+
+mod_norm_reg2 <- brm(formula=  nota_estad ~ sex + nota_access + (nota_inform + nota_termo
+                     + nota_graf + nota_mec+ n_matr_por_asig|any_acces) + any_estad,
+                     data=df_train1,family=gaussian(),warmup=1000,iter=2000,chains=4)
+
+MAPE2=sum(abs(df_test$nota_estad-predict(mod_norm_reg2,newdata=df_test))/nrow(df_test))
+
+# We would choose the model with the lowest MAPE and use it to get the predictions
+
+predictions_regression <- predict(ifelse(MAPE1<MAPE2,mod_norm_reg1,mod_norm_reg2),newdata=df_test)
+
+# save(predictions_regression, file = "predictions_regression")
+```

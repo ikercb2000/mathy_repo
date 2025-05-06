@@ -1,0 +1,181 @@
+---
+title: "Assignment 5"
+author: "Iker Cesar Caballero Bragagnini"
+date: "2023-03-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sm)
+library(glmnet)
+library(pROC)
+load("~/Desktop/bikes.Washington.Rdata")
+```
+
+### Exercise 2
+
+### a)
+
+In this exercise we are asked to compute a non-parametric logistic regression using splines with a IRWLS procedure through the function defined in "IRWLS logistic regression.R".
+
+To do so we first create the binary variable asked with the cnt variable from the dataset, and we define a new variable "cnt.5000" using the function ifelse() and the condiition stated.
+
+```{r}
+# Binary variable creation
+
+bikes$cnt.5000 <- ifelse(bikes$cnt>=5000,1,0)
+```
+
+Then, we load the function "logistic.IRWLS.splines" (available in the Annex) in order to estimate the non-parametric regression for "cnt.5000" on "temp". We also print plots in order to visually understand the estimation through the IRWLS algorithm.
+
+```{r}
+# Non-parametric logistic regression estimation through IRWLS
+
+log_spline <- logistic.IRWLS.splines(bikes$temp,bikes$cnt.5000,plts=TRUE)
+```
+
+From the graphs shown above, we can see how the algorithm starts fitting a straight line to the data, but then quickly converges over and over to a curve which is increasing until temp=25 (approximately) and then decreases afterwards.
+
+In order to obtain the range for which P(cnt>=5000|temp)>0.5 can be obtained through the fitted values of the estimated regression. We first join the fitted values to each observation in the dataset and then we obtain the temperatures of those observations which accomplishes P(cnt>=5000|temp)>0.5.
+
+```{r}
+# Range obtention
+
+fit.log <- log_spline$fitted.values
+bikes$fit.log <- fit.log; temp_05 <- bikes$temp[bikes$fit.log>0.5]
+paste0("The range of temp for which P(cnt>=5000|temp)>0.5 goes from ",round(min(temp_05),3)," to ",round(max(temp_05),3))
+```
+
+### b)
+
+To choose the parameter df through k-fold log-likelihood cross validation, we first need to define a function "loglikCVdf", which allows to choose the optimal df through k-fold loglikelihood cross-validation. In this function, we use the previous function to estimate our non-parametric model and we create a procedure such that we can get the log-likelihood for each fold and for each df that we want to evaluate.
+
+```{r}
+# k-fold cross validation function
+
+loglikCVdf <- function(data,k,dfs){
+  
+  nIter <- length(dfs)
+  
+  logit<-function(train_mat,test_mat,d){
+    mod_log <- logistic.IRWLS.splines(y=train_mat[,2],x=train_mat[,1],df=d,plts=F,x.new = test_mat[,1])
+    pred <- mod_log$predicted.values
+    y=test_mat[,2]
+    res <- sum(y*log(pred/(1-pred))+log(1-pred))/n
+    return(res)
+  }
+  
+  logliks <- matrix(0, nrow=nIter,ncol=nIter)
+  
+  for (l in 1:nIter){
+    for (i in 1:nIter) {
+      indices <- sample(1:k, nrow(data), replace = TRUE)
+      iter_loglik <- rep(0, k)
+    
+    for (j in 1:k) {
+      train1 <- data[indices != j, ]
+      test1 <- data[indices == j, ]
+      train_mat <- train1[,c(6,10)] # Get "temp" & "cnt.5000"
+      test_mat <- test1[,c(6,10)]
+      iter_loglik[j] <- logit(train_mat,test_mat,d=dfs[i])
+    
+    }
+    
+    logliks[l,i] <- mean(iter_loglik)
+    
+    }
+  }
+  
+  loglik_mean <- apply(logliks, 2, mean)
+  
+  opt_ind <- which(loglik_mean == max(loglik_mean))
+  
+  optimalDf <- dfs[opt_ind]
+  
+  plot(dfs,loglik_mean,ylab="Log-Likelihood",xlab="df",xlim=c(2,16))
+  title(main="Log-Likelihood for each df")
+  abline(v=optimalDf,col="darkred")
+  abline(h=max(loglik_mean),col="darkred")
+  return(paste0("The optimal df is ",optimalDf))
+}
+```
+
+Now that the function is defined, we can specify k=5 and different degrees of freedom, from 3 to 15 (as demanded).
+
+```{r}
+# k-fold cross validation function
+
+df.v <- 3:15
+loglikCVdf(bikes,5,df.v)
+```
+
+In the figure shown, we can see how log-likelihood for our non-parametric regression first increases but then decreases at df=7, so df=7 achieves the maximum log-likelihood and, hence, it is our optimal parameter.
+
+### Annex
+
+```{r}
+# logistic.IRWLS.splines function
+
+logistic.IRWLS.splines <- function(x,y,weights.out=1,x.new=x,
+                           df=6,spar=NULL, 
+                           all.knots = FALSE, nknots = .nknots.smspl,  
+                           max.iter=10,eps.beta=1e-5,
+                           plts=FALSE){
+  if (plts&(dim(as.matrix(x))[2]>1)){
+    plts<-FALSE
+    warning("Plots are valid only when dim(x)[2]==1")
+  }
+  
+  stop.rule <- FALSE
+  iter <- 0
+  theta.0 <- fitted(lm(y~x)) 
+  
+  while (!stop.rule){
+    iter <- iter + 1 
+    
+    p <- p.from.theta(theta.0)
+    ps.e <- (y-p)/(p*(1-p))
+    z <- theta.0 + ps.e 
+    wt <- p*(1-p) *weights.out
+    
+    if (plts){
+      op<-par(mfrow=c(1,2))
+      plot(x,y,cex=8*wt)
+      lines(x,p,col=2)
+      plot(x,z,cex=8*wt)
+      lines(x,theta.0,col=2)
+      par(op)
+    }
+    
+    spline.1 <- smooth.spline(x,z,w=wt,df=df,spar=spar,
+                              all.knots = all.knots,
+                              nknots = nknots) 
+    theta.1 <- predict(spline.1,x=x)$y
+    
+    if ((iter>=max.iter)|(sum((theta.1-theta.0)^2)<eps.beta)){
+      stop.rule<-TRUE
+    } else {
+      theta.0 <- theta.1
+    }
+  }
+  
+  p <- p.from.theta(theta.1)
+  resid.devi <- sum(-2*dbinom(y,1,p,log=TRUE))
+  
+  return(list(fitted.values=p,
+              theta.x=theta.1,
+              df=spline.1$df,
+              predicted.values=p.from.theta(predict(spline.1,x=x.new)$y),
+              residual.deviance=resid.devi)
+  )
+}
+
+# p.from.theta function
+
+p.from.theta <- function(theta.x){
+  p.x <- 1/(1+exp(-theta.x))
+  return(p.x)
+}
+```
+

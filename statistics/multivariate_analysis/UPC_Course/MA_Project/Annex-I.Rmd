@@ -1,0 +1,242 @@
+---
+title: "Appendix 1. Descriptive Analysis"
+author: "Iker Caballero & Daniel González"
+date: "2023-03-20"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+credsco <- read_delim("/Users/ikercaballerobragagnini/Desktop/credscoClean.csv", delim = ";", escape_double = FALSE, trim_ws = TRUE)
+library(descr)
+library(psych)
+```
+
+# Data Preprocessing
+
+```{r}
+# For Vivienda
+credsco$Vivienda <- as.factor(credsco$Vivienda)
+
+credsco <- credsco[credsco$Vivienda!="ignora_cont"&credsco$Vivienda!="VivUnkown",]
+credsco <- droplevels.data.frame(credsco,exclude=c("ignora_cont","VivUnkown"))
+
+levels(credsco$Vivienda) <- c("altres viv","comprada","comprada","lloguer","pares")
+
+levels(credsco$Vivienda)
+
+# For Estado Civil
+
+credsco$Estado.civil <- as.factor(credsco$Estado.civil)
+
+credsco <- credsco[credsco$Estado.civil!="ECUnknown",]
+credsco <- droplevels.data.frame(credsco,exclude="ECUnknown")
+
+levels(credsco$Estado.civil) <- c("amb.par","tenien.par","tenien.par","sens.par","tenien.par")
+
+levels(credsco$Estado.civil)
+
+# For Tipo Trabajo
+
+credsco$Tipo.trabajo <- as.factor(credsco$Tipo.trabajo)
+
+credsco <- credsco[credsco$Tipo.trabajo!="WorkingTypeUnknown",]
+credsco <- droplevels.data.frame(credsco,exclude="WorkingTypeUnknown")
+
+levels(credsco$Tipo.trabajo)
+```
+
+# Question 1
+
+```{r,fig.show = 'hide'}
+# Graphical Analysis for Tipo.trabajo
+tab_job <- table(credsco$Tipo.trabajo)
+barplot(tab_job,col=c("pink","skyblue","lightyellow","lightgreen"))
+title(main = "Multiple Barplot of Type of Contract", cex.main=0.75)
+
+# Bivariate Graphical Analysis with "Dictamen"
+tab_job_cred <- table(credsco$Dictamen,credsco$Tipo.trabajo)
+data_percentage <- apply(tab_job_cred, 2, function(x){x*100/sum(x,na.rm=T)})
+barplot(data_percentage,col=c("pink","skyblue"),legend=TRUE,xlim = c(0,6.5),ylab="Percentage")
+title(main = "Stacked Barplot divided by Dictamen", cex.main=0.75)
+```
+
+```{r}
+# Numerical Analysis
+
+(dist_job <- round(freq(credsco$Tipo.trabajo,plot=FALSE),1))
+
+# Bivariate Numerical Analysis with "Dictamen"
+
+(dist_job_diag <- suppressWarnings(CrossTable(credsco$Tipo.trabajo,credsco$Dictamen, 
+                                              prop.t=TRUE, 
+                                              prop.r=TRUE, prop.c=TRUE,
+                                              prop.chisq = F,digits=2)))
+(chisq.test(tab_job_cred))
+```
+
+# Question 2
+
+```{r,fig.show = 'hide'}
+# Graphical Analysis for both variables
+tab_viv <- table(credsco$Vivienda)
+barplot(tab_viv,col=c("pink","skyblue","lightyellow","lightgreen"),ylim=c(0,2500))
+title(main = "Multiple Barplot of Type of House", cex.main=1.25)
+tab_ec <- table(credsco$Estado.civil)
+barplot(tab_ec,col=c("pink","skyblue","lightyellow"))
+title(main = "Multiple Barplot of Civil Status", cex.main=1)
+
+# Bivariate Graphical Analysis for both variables
+
+tab_viv_cs <- table(credsco$Vivienda,credsco$Estado.civil)
+data_percentage1 <- apply(tab_viv_cs, 2, function(x){x*100/sum(x,na.rm=T)})
+barplot(data_percentage1,col=c("pink","skyblue","lightyellow",
+                                     "lightgreen"),legend=TRUE,
+                                     ylab="Percentage",xlim=c(0,5))
+title(main = "Stacked Barplot divided by Civil Status", cex.main=0.75)
+
+# Bivariate Graphical Analysis with "Dictamen"
+
+tab_viv_dict <- table(credsco$Dictamen,credsco$Vivienda)
+tab_cs_dict <- table(credsco$Dictamen,credsco$Estado.civil)
+data_percentage_viv <- apply(tab_viv_dict, 2, function(x){x*100/sum(x,na.rm=T)})
+data_percentage_cs <- apply(tab_cs_dict, 2, function(x){x*100/sum(x,na.rm=T)})
+barplot(data_percentage_viv,col=c("pink","skyblue"),legend=TRUE,xlim = c(0,6),
+                                        ylab="Percentage")
+title(main = "Stacked Barplot divided by Dictamen", cex.main=0.75)
+barplot(data_percentage_cs,col=c("pink","skyblue"),
+                                       legend=TRUE,
+                                       xlim = c(0,5),
+        ylab="Percentage")
+title(main = "Stacked Barplot divided by Dictamen", cex.main=0.75)
+```
+
+```{r}
+# Numerical Analysis for both variables
+(dist_viv <- round(freq(credsco$Vivienda,plot=FALSE),1))
+(dist_cs <-  round(freq(credsco$Estado.civil,plot=FALSE),1))
+
+# Numerical Bivariate Analysis for both variables
+
+(dist_viv_cs <- suppressWarnings(CrossTable(credsco$Vivienda,
+                                            credsco$Estado.civil,
+                                            prop.t=TRUE, 
+                                            prop.r=TRUE, prop.c=TRUE,
+                                            prop.chisq = F,digits=2)))
+
+# Numerical Bivariate Analysis with "Dictamen"
+
+(dist_viv_dict <- suppressWarnings(CrossTable(credsco$Vivienda,
+                                              credsco$Dictamen,
+                                              prop.t=TRUE, prop.r=TRUE,
+                                              prop.c=TRUE,
+                                              prop.chisq = F,digits=2)))
+(dist_cs_dict <- suppressWarnings(CrossTable(credsco$Estado.civil,
+                                             credsco$Dictamen, 
+                                             prop.t=TRUE, prop.r=TRUE, prop.c=TRUE,
+                                             prop.chisq = F,digits=2)))
+(chisq.test(tab_viv_cs))
+(chisq.test(tab_cs_dict))
+(chisq.test(tab_viv_dict))
+```
+
+
+# Question 3
+
+```{r,fig.show = 'hide'}
+# Univariate analysis
+d=describe(credsco[c(9,10)])
+as.data.frame(d)[,-c(1,6,7,13)]
+
+boxplot(credsco[,9], horizontal=TRUE, xlab=colnames(credsco[,9]))
+boxplot(credsco[,10], horizontal=TRUE, xlab=colnames(credsco[,10]))
+
+hist(credsco$Gastos, xlab="Gastos")
+hist(credsco$Ingresos, xlab="Ingresos")
+
+credsco<-credsco[credsco[,9]<=125,]
+credsco<-credsco[credsco[,10]<=250,]
+
+boxplot(credsco[,9], horizontal=TRUE, xlab=colnames(credsco[,9]))
+boxplot(credsco[,10], horizontal=TRUE, xlab=colnames(credsco[,10]))
+
+hist(credsco$Gastos, xlab="Gastos")
+hist(credsco$Ingresos, xlab="Ingresos")
+
+hist(credsco$Gastos, xlab="Gastos")
+hist(credsco$Ingresos, xlab="Ingresos")
+
+cor(credsco[,c(9,10)])
+
+# Net income
+
+net_inc <- credsco[,10]-credsco[,9]
+credsco3 <- cbind(credsco,net_inc)
+colnames(credsco3) <- c(colnames(credsco),"net_inc")
+d_inc=describe(credsco3$net_inc)
+as.data.frame(d_inc)[,-c(1,6,7,13)]
+boxplot(credsco3[,17], horizontal=TRUE, xlab="Net Income")
+hist(credsco3[,17], xlab="Net Income")
+
+d_pos1=describe(credsco3[(credsco$Dictamen=="positiu"),
+                         17])
+d_neg1=describe(credsco3[(credsco$Dictamen!="positiu"),
+                         17])
+as.data.frame(d_pos1)[,-c(1,6,7,13)]
+as.data.frame(d_neg1)[,-c(1,6,7,13)]
+boxplot(credsco3$net_inc ~ credsco3$Dictamen, 
+        horizontal=TRUE,
+        xlab="Net Income",ylab="Dictamen")
+
+# Tests hypothesis
+
+t.test(credsco3[(credsco$Dictamen=="positiu"),17], credsco3[(credsco$Dictamen!="positiu"),17], 
+       alternative = "two.sided", 
+       var.equal = FALSE)
+```
+
+# Question 4
+
+```{r,fig.show = 'hide'}
+# Univariate analysis
+
+p=describe(credsco$Precio.del.bien.financiado)
+as.data.frame(p)[,-c(1,6,7,13)]
+
+boxplot(credsco$Precio.del.bien.financiado, horizontal=TRUE, xlab=colnames(credsco[,14]))
+hist(credsco$Precio.del.bien.financiado, xlab=colnames(credsco[,14]))
+
+credsco<-credsco[credsco$Precio.del.bien.financiado<=2500,]
+
+p=describe(credsco$Precio.del.bien.financiado)
+as.data.frame(p)[,-c(1,6,7,13)]
+
+boxplot(credsco$Precio.del.bien.financiado, horizontal=TRUE, xlab=colnames(credsco[,14]))
+hist(credsco$Precio.del.bien.financiado, xlab=colnames(credsco[,14]))
+
+# Related to Dictamen
+
+p_pos=describe(credsco$Precio.del.bien.financiado
+               [credsco$Dictamen=="positiu"])
+p_neg=describe(credsco$Precio.del.bien.financiado
+               [credsco$Dictamen!="positiu"])
+as.data.frame(p_pos)[,-c(1,6,7,13)]
+as.data.frame(p_neg)[,-c(1,6,7,13)]
+boxplot(credsco$Precio.del.bien.financiado 
+        ~ credsco$Dictamen, 
+        horizontal=TRUE,xlab="Ingresos",
+        ylab="Dictamen")
+
+# Tests hypothesis
+
+t.test(
+  credsco$Precio.del.bien.financiado
+  [credsco$Dictamen=="positiu"], 
+  credsco$Precio.del.bien.financiado
+  [credsco$Dictamen!="positiu"], 
+  alternative = "two.sided", var.equal = FALSE)
+```

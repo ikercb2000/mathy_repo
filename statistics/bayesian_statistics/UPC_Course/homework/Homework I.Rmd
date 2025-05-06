@@ -1,0 +1,156 @@
+---
+title: "Homework 1 Bayesian Analysis"
+author: "Iker Cesar Caballero Bragagnini"
+date: "2023-02-23"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Homework 1
+
+#### Marc has followed a tutorial to manipulate a coin in order to increase the probability of observing a head after trhowing it. Marc trusts that the probability of obtaining a head with his manipulated coin is about 2/3, and considers that his prior distribution for this probability is a $Beta(4,2)$.
+
+#### In order to increase the knowledge about the probability of observing a head with his coin, he carries out Experiment 1 : throw the coin 10 times and count the number of heads. After throwing the coin 10 times he has observed 6 heads.
+
+#### 1. What is the Bayesian model for Experiment 1 ?
+
+###### To define the Bayesian model, it is necessary to first define which is the statistical model. In this case, the experiment will follow a Binomial distribution (because of the multiple Bernoulli trials) and there were $n=10$ trials and hence the statistical model will be the following:
+
+$$
+M=\left\{Bin(n=10,p);p\in[0,1]\right\}
+$$
+$$
+where\quad Y \sim Bin(n,p) \quad follows \quad \pi(y|n,p)=\binom{n}{y}p^y(1-p)^{n-y}
+$$
+
+###### Now that the statistical model has been defined, we can use the prior distribution $Beta(4,2)$ considered by Marc to specify the following bayesian model:
+
+$$
+M_{Bayes}=\left\{Bin(n=10,p);p\in[0,1];\pi(p)\right\}
+$$
+$$
+where \quad \pi(p)=\frac{\Gamma(6)}{\Gamma(4)\Gamma(2)}p^{3}(1-p)^{1}
+$$
+
+#### 2. What is the likelihood function for the data observed in Experiment 1 ?
+
+###### In order to derive the likelihood function we must use the experiment distribution (the binomial distribution) and use the design and results obtained:
+
+$$
+\pi(y|p)=\binom{10}{6}p^6(1-p)^{4}
+$$
+
+#### 3. What is the posterior distribution after performing Experiment 1 ?
+
+###### After performing the experiment, the posterior density function can be obtained by multiplying the prior density function times the likelihood function. In this case, we can see that the beta distribution is a conjugate of the binomial, so they have the same form and we can obtain the following proportionality:
+
+$$
+\pi(p|y) \propto \pi(y|p)\pi(p)=\binom{10}{6}p^6(1-p)^{4}\frac{\Gamma(6)}{\Gamma(4)\Gamma(2)}p^{3}(1-p)^{1}=
+$$
+$$
+=\frac{\Gamma(6)}{\Gamma(4)\Gamma(2)}\binom{10}{6}p^{9}(1-p)^{5}\propto p^{9}(1-p)^{5}
+$$
+
+###### As we can see, the form of $p^{9}(1-p)^{5}$ is the one of a beta distribution with parameters $\alpha=10$ and $\beta=6$, so the density of the posterior distribution is the following:
+
+$$
+\pi(p|y)=\frac{\Gamma(16)}{\Gamma(10)\Gamma(6)}p^{9}(1-p)^{5}
+$$
+
+###### Once the information of Experiment 1 has been obtained and analyzed, Marc decides to carry out a second experiment in order to continue learning about the probability of observing a head when throwing his manipulated coin. Experiment 2 consists in throwing the coin $x$ times until observing 10 heads. When doing Experiment 2, he needs to throw the coin 17 times to observe 10 heads.
+
+#### 4. What is the Bayesian model for this Experiment 2?
+
+###### In this case, the experiment is designed in a different way: now Marc does not flip the coin an observes successes, but he keeps flipping the coin until he observes a number of heads. Hence, the statistical model here would be based on the negative binomial distribution:
+
+$$
+M'=\left\{NegBin(r=17,p);p\in[0,1]\right\}
+$$
+$$
+where\quad Y \sim NegBin(r,p) \quad follows \quad \pi'(y|r,p)=\binom{y-1}{r-1}p^r(1-p)^{y-r}
+$$
+###### Now that the statistical model has been defined, we can use the posterior distribution that we found earlier to specify the following bayesian model, as this posterior distribution has updated information (through the data) about the probability of heads:
+
+$$
+M'_{Bayes}=\left\{NegBin(r=17,p);p\in[0,1];\pi'(p)\right\}
+$$
+$$
+where \quad \pi'(p)=\frac{\Gamma(16)}{\Gamma(10)\Gamma(6)}p^{9}(1-p)^{5}
+$$
+
+#### 5. What is the likelihood function for the data in Experiment 2 ?
+
+###### In order to derive the likelihood function we must use the experiment distribution (the binomial distribution) and use the design and results obtained:
+
+$$
+\pi'(y|p)=\binom{16}{9}p^{10}(1-p)^{7}
+$$
+
+#### 6. What is the posterior distribution after performing Experiment 2 ?
+
+###### After performing the experiment, the posterior density function can be obtained by multiplying the prior density function times the likelihood function. In this case, we can see that the beta distribution is a conjugate of the negative binomial, so they have the same form and we can obtain the following proportionality:
+
+$$
+\pi'(p|y)\propto\pi'(y|p)\pi'(p)=\binom{16}{9}p^{10}(1-p)^{7}\frac{\Gamma(16)}{\Gamma(10)\Gamma(6)}p^9(1-p)^5
+$$
+$$
+=\binom{16}{9}\frac{\Gamma(16)}{\Gamma(10)\Gamma(6)}p^{19}(1-p)^{12}\propto p^{19}(1-p)^{12}
+$$
+
+###### As we can see, the form of $p^{19}(1-p)^{12}$ is the one of a beta distribution with parameters $\alpha=20$ and $\beta=13$, so the density of the posterior distribution is the following:
+
+$$
+\pi'(p|y)=\frac{\Gamma(33)}{\Gamma(20)\Gamma(13)}p^{19}(1-p)^{12}
+$$
+
+#### 7.Draw the prior distribution, the likelihood function and the posterior distribution for every experiment.
+
+###### The different functions in Experiment 1 have been plotted as follows:
+
+```{r,message=FALSE,echo=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+p <- seq(0, 1, 0.01)
+likelihood <- map_dbl(p, ~ dbinom(6,10,.x))
+df <- tibble(p, likelihood)
+
+coef <- sum(likelihood)*0.01
+df$likelihood <- df$likelihood/coef
+
+ggplot(df) +
+  geom_line(aes(x = p, y = likelihood),col="blue")+
+  stat_function(fun = dbeta, args = list(shape1 = 4, shape2 = 2)) +
+  stat_function(fun = dbeta, args = list(shape1 = 10, shape2 = 6),col="red") +
+  xlim(c(0, 1))
+```
+
+###### The red distribution is the posterior distribution $\pi(p|y)$, the black one is the prior distribution $\pi(p)$ and the blue one is the standardized likelihood $\pi(y|p)$.
+
+###### The different functions in Experiment 2 have been plotted as follows:
+
+```{r,echo=FALSE}
+p1 <- seq(0, 1, 0.01)
+p1 <- p1[-1]
+likelihood1 <- map_dbl(p1, ~ dnbinom(10,17,.x))
+df1 <- tibble(p1, likelihood1)
+
+coef1 <- sum(likelihood1)*0.01
+df1$likelihood1 <- df1$likelihood1/coef1
+
+ggplot(df1) +
+  stat_function(fun = dbeta, args = list(shape1 = 10, shape2 = 6)) +
+  geom_line(aes(x = p1, y = likelihood1), col="blue") +
+  stat_function(fun = dbeta, args = list(shape1 = 20, shape2 = 13), col="red") +
+  xlim(c(0, 1))
+```
+
+###### The red distribution is the posterior distribution $\pi'(p|y)$, the black one is the prior distribution $\pi'(p)$ and the blue one is the standardized likelihood $\pi'(y|p)$.

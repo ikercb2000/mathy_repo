@@ -1,0 +1,481 @@
+---
+title: "IPI Code"
+author: "Iker Caballero"
+date: "2023-05-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(autostsm)
+library(forecast)
+library("chron")
+```
+
+## About the data
+
+```{r}
+# Load the Data
+serie=ts(read.table("ipi.dat"),start=1990,freq=12)
+auto.arima(serie)
+# Plot the time series
+plot(serie,main="Monthly Industrial Production Index in Spain (Base 2016)", ylab="Value")
+abline(v=1990:2020,lty=3,col=4)
+abline(h=mean(serie), col=2)
+
+plot(decompose(serie,type="additive"))
+```
+
+## Exploratory Analysis
+
+```{r}
+# Transformation identification
+
+m=apply(matrix(serie,ncol=20),2,mean)
+v=apply(matrix(serie,ncol=20),2,var)
+ 
+plot(v~m,main="Mean-Variance Plot",xlab="Mean",ylab="Variance")
+abline(lm(v~m))
+
+boxplot(serie~floor(time(serie)),main="Boxplot",xlab="Time",ylab="Value")
+
+lserie=log(serie)
+
+plot(lserie,main="Log-transformed Series", ylab="Value")
+```
+
+```{r}
+# Seasonality identification
+
+monthplot(serie,main="Monthplot",ylab="Value",xlab="Months")
+
+d12lserie=diff(lserie,12)
+
+plot(d12lserie,main="Seasonal Differentiated Series", ylab="Value")
+abline(h=mean(d12lserie), col=2)
+```
+
+```{r}
+# Non-stationarity identification
+par(mfrow=c(1,2))
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)),lwd=2,main="ACF for Original TS")
+acf(d12lserie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)),lwd=2,main="ACF for Transformed TS")
+```
+
+## Model identification
+
+```{r}
+# Autocorrelation Structure
+par(mfrow=c(1,2), mar = c(5, 4, 4, 2))
+acf(d12lserie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)), main ="ACF",lwd=2)
+pacf(d12lserie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)), main ="PACF",lwd=2)
+```
+
+## Model Estimation
+
+```{r}
+# SARMA models
+(mod1=arima(d12lserie,order=c(3,0,0),seasonal=list(order=c(1,0,0)),include.mean=F))
+(mod2=arima(d12lserie,order=c(3,0,0),seasonal=list(order=c(0,0,2)),include.mean=F)) #
+(mod3=arima(d12lserie,order=c(3,0,0),seasonal=list(order=c(1,0,1)),include.mean=F))
+
+# t-Statistics
+abs(mod1$coef/sqrt(diag(mod1$var.coef)))
+abs(mod2$coef/sqrt(diag(mod2$var.coef)))
+abs(mod3$coef/sqrt(diag(mod3$var.coef)))
+```
+
+## Model Validation
+
+```{r}
+# Validation function
+
+validation=function(model,dades){
+  s=frequency(get(model$series))
+  resid=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resid,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resid,breaks=20,freq=F)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #ACF & PACF of square residuals 
+  par(mfrow=c(1,2))
+  acf(resid^2,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid^2,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+    
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:20])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:20])
+  
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resid(model)))
+  
+  #Sample ACF vs. Teoric ACF
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  acf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample ACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36),ylim=c(-1,1), 
+       type="h",xlab="Lag",  ylab="", main="ACF Teoric")
+  abline(h=0)
+  
+  #Sample PACF vs. Teoric PACF
+  pacf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample PACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36, pacf=T),ylim=c(-1,1),
+       type="h", xlab="Lag", ylab="", main="PACF Teoric")
+  abline(h=0)
+  par(mfrow=c(1,1))
+}
+```
+
+```{r}
+# Validation models
+
+validation(mod1,d12lserie)
+validation(mod2,d12lserie)
+validation(mod3,d12lserie)
+```
+
+```{r}
+# Adequacy measures
+resul=data.frame(
+  Sigma2Z=c(mod1$sigma2, mod2$sigma2, mod3$sigma2),
+  AIC=c(AIC(mod1), AIC(mod2), AIC(mod3)),
+  BIC=c(BIC(mod1), BIC(mod2), BIC(mod3)))
+row.names(resul)=c("SARIMA(3,0,0)(1,0,0)", "SARIMA(3,0,0)(0,0,2)", "SARIMA(3,0,0)(1,0,1)")
+
+resul
+```
+
+## Prediction for model 1
+
+```{r}
+# Stability mod1
+
+ultim=c(2018,12)
+pdq=c(3,0,0)
+PDQ=c(1,1,0)
+
+serie2=window(serie,end=ultim)
+lserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lserie1=log(serie1)
+
+(modA=arima(lserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+
+# Prediction Capability mod1
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(2015,2020),type="o",main=paste("Model SARIMA(3,0,0)(1,1,0)12"))
+abline(v=2015:2020,lty=3,col=4)
+
+# Predictive metrics mod1
+
+obs=window(serie,start=ultim)
+
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+```
+
+## Prediction for model 2
+
+```{r}
+# Stability mod2
+
+ultim=c(2018,12)
+pdq=c(3,0,0)
+PDQ=c(0,1,2)
+
+serie2=window(serie,end=ultim)
+lserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lserie1=log(serie1)
+
+(modA=arima(lserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+
+# Prediction Capability mod2
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(2015,2020),type="o",main=paste("Model SARIMA(3,0,0)(0,1,2)12"))
+abline(v=2015:2020,lty=3,col=4)
+
+# Predictive metrics mod2
+
+obs=window(serie,start=ultim)
+
+mod.RMSE2=sqrt(sum((obs-pr)^2)/12)
+mod.MAE2=sum(abs(obs-pr))/12
+mod.RMSPE2=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE2=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE2,"MAE"=mod.MAE2,"RMSPE"=mod.RMSPE2,"MAPE"=mod.MAPE2)
+
+mCI2=mean(tu-tl)
+```
+
+## Prediction for model 3
+
+```{r}
+# Stability mod3
+
+ultim=c(2018,12)
+pdq=c(3,0,0)
+PDQ=c(1,1,1)
+
+serie2=window(serie,end=ultim)
+lserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lserie1=log(serie1)
+
+(modA=arima(lserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+
+# Prediction Capability mod3
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+a=ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(2015,2020),type="o",main=paste("Model SARIMA(3,0,0)(1,1,1)12"))
+a
+
+# Predictive metrics mod3
+
+obs=window(serie,start=ultim)
+
+mod.RMSE3=sqrt(sum((obs-pr)^2)/12)
+mod.MAE3=sum(abs(obs-pr))/12
+mod.RMSPE3=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE3=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE3,"MAE"=mod.MAE3,"RMSPE"=mod.RMSPE3,"MAPE"=mod.MAPE3)
+
+mCI3=mean(tu-tl)
+```
+
+```{r}
+# Predictive metrics total
+
+resul=matrix(c(AIC(mod1),BIC(mod1),mod.RMSE1,mod.MAE1,mod.RMSPE1,mod.MAPE1,mCI1,AIC(mod2),BIC(mod2),mod.RMSE2,mod.MAE2,mod.RMSPE2,mod.MAPE2,mCI2,AIC(mod3),BIC(mod3),mod.RMSE3,mod.MAE3,mod.RMSPE3,mod.MAPE3,mCI3),nc=7,byrow=T)
+
+dimnames(resul)[[2]]=c("AIC","BIC","RMSE","MAE","RMSPE","MAPE","meanCI")
+row.names(resul)=c("SARIMA(3,0,0)(1,1,0)","SARIMA(3,0,0)(0,1,2)","SARIMA(3,0,0)(1,1,1)")
+resul
+
+# Long-term forecast
+
+pred=predict(modA,n.ahead=12)
+pr<-ts(c(tail(lserie1,1),pred$pred),start=ultim+c(1,0),freq=12)
+se<-ts(c(0,pred$se),start=ultim+c(1,0),freq=12)
+
+tl1<-ts(exp(pr-1.96*se),start=ultim+c(1,0),freq=12)
+tu1<-ts(exp(pr+1.96*se),start=ultim+c(1,0),freq=12)
+pr1<-ts(exp(pr),start=ultim+c(1,0),freq=12)
+
+ts.plot(serie,tl1,tu1,pr1,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(2015,2021),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+abline(v=2015:2021,lty=3,col=4)
+
+```
+
+## Calendar effects Treatment
+
+```{r}
+# Calendar Effects
+
+source("CalendarEffects.r")
+data=c(start(lserie)[1],start(lserie)[2], length(lserie))
+
+cr=ts(rep(0,length(lserie)),start=1990,freq=12)
+cr[220:(length(lserie)-72)]=1
+cr
+
+wTradDays=Wtrad(data)
+wEast=Weaster(data)
+
+(mod3c=arima(lserie,order=c(3,0,0),seasonal=list(order=c(1,1,1),period=12),xreg=data.frame(wTradDays,wEast,cr)))
+(mod3cc=arima(lserie,order=c(3,0,0),seasonal=list(order=c(1,1,1),period=12),xreg=data.frame(wTradDays,wEast)))
+
+
+EfecTD=coef(mod3c)["wTradDays"]*wTradDays
+EfecSS=coef(mod3c)["wEast"]*wEast
+plot(EfecTD+EfecSS,ylab="Value",main="Total Calendar Effects on the TS")
+
+lseriec=lserie-EfecTD-EfecSS
+```
+
+
+## Outlier treatment
+
+```{r}
+# Outliers detection
+
+source("atipics2.r")
+mod.atip=outdetec(mod3,dif=c(0,12),crit=2.8,LS=T)
+mod.atip$sigma
+
+atipics=mod.atip$atip[order(mod.atip$atip[,1]),]
+meses=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic")
+
+data.frame(atipics,Fecha=paste(meses[(atipics[,1]-1)%%12+1],start(lserie)[1]+((atipics[,1]-1)%/%12)),perc.Obs=exp(atipics[,3])*100)
+
+# Linear series
+
+lserie.lin=lineal(lserie,mod.atip$atip)
+serie.lin=exp(lserie.lin)
+plot(serie.lin,col=2)
+lines(serie)
+plot(lserie-lserie.lin)
+```
+
+## Estimation of new model
+
+```{r}
+# Estimation linear series
+lserie.lin=lineal(lserie,mod.atip$atip)
+lseriec=lserie.lin-EfecTD-EfecSS
+seriec=exp(lseriec)
+
+plot(seriec,col=2)
+lines(serie)
+
+d12lnserie.lin=diff(lseriec,12)
+par(mfrow=c(1,2))
+acf(d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(2,rep(1,11)),lwd=2,main="New ACF")
+pacf(d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(rep(1,11),2),lwd=2,main="New PACF")
+
+(mod1c=arima(d12lnserie.lin,order=c(3,0,0),seasonal=list(order=c(1,0,0)),include.mean=F))
+(mod2c=arima(d12lnserie.lin,order=c(3,0,0),seasonal=list(order=c(0,0,2)),include.mean=F))
+(mod3c=arima(d12lnserie.lin,order=c(3,0,0),seasonal=list(order=c(1,0,1)),include.mean=F))
+
+validation(mod1c,d12lnserie.lin)
+validation(mod2c,d12lnserie.lin)
+validation(mod3c,d12lnserie.lin)
+```
+
+## Forecasting with new model
+
+```{r}
+# Stability
+
+ultim=c(2018,12)
+
+serie1.lin=window(serie.lin,end=ultim+c(1,0))
+lnserie1=log(serie1)
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+wTradDays2=window(wTradDays,end=ultim)
+wEast2=window(wEast,end=ultim)
+
+(mod3cc1=arima(lnserie1,order=c(3,0,0),seasonal=list(order=c(0,1,2),period=12),xreg=data.frame(wTradDays,wEast)))
+(mod3cc2=arima(lnserie2,order=c(3,0,0),seasonal=list(order=c(0,1,2),period=12),xreg=data.frame(wTradDays2,wEast2)))
+```
+
+```{r}
+# Forecasting
+
+pred1=predict(mod3cc2,n.ahead=12,newxreg=window(cbind(wTradDays,wEast),start=c(ultim[1]+1,1)))
+predic1=pred1$pr
+pr1<-ts(c(tail(lnserie2,1),predic1),start=ultim,freq=12)
+se1<-ts(c(0,pred1$se),start=ultim,freq=12)
+
+tl1<-ts(exp(pr1-1.96*se1),start=ultim,freq=12)
+tu1<-ts(exp(pr1+1.96*se1),start=ultim,freq=12)
+pr1<-ts(exp(pr1),start=ultim,freq=12)
+
+ts.plot(serie,tl1,tu1,pr1,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(2015,2020),type="o",main="Model ARIMA(3,0,0)(0,1,2)12+Outliers+Cal.Eff")
+abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+```{r}
+# Results comparison
+
+obs1=window(serie,start=ultim)
+mod.RMSE21=sqrt(sum((obs1-pr1)^2)/12)
+mod.MAE21=sum(abs(obs1-pr1))/12
+mod.RMSPE21=sqrt(sum(((obs1-pr1)/obs1)^2)/12)
+mod.MAPE21=sum(abs(obs1-pr1)/obs1)/12
+
+mCI21=mean(tu1-tl1)
+
+resul=data.frame(
+  par=c(length(coef(mod3)),length(coef(mod3cc1))+nrow(mod.atip$atip)),
+  Sigma2Z=c(mod3$sigma2,mod3cc1$sigma2),
+  AIC=c(AIC(mod3),AIC(mod3cc1)+2*nrow(mod.atip$atip)),
+  BIC=c(BIC(mod3),BIC(mod3cc1)+log(length(serie)-13)*nrow(mod.atip$atip)),
+  RMSE=c(mod.RMSE3,mod.RMSE21),
+  MAE=c(mod.MAE3,mod.MAE21),
+  RMSPE=c(mod.RMSPE3,mod.RMSPE21),
+  MAPE=c(mod.MAPE3,mod.MAPE21),
+  meanLength=c(mCI3,mCI21))
+row.names(resul)=c("ARIMA(3,0,0)(0,1,2)12","ARIMA(3,0,0)(0,1,2)12+Outliers+Cal.Eff")
+resul
+```

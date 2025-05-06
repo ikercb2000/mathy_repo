@@ -1,0 +1,635 @@
+---
+title: "Time Series Assignment 1"
+author: "Iker Caballero Bragagnini"
+date: "2023-04-07"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+# Validation
+
+validation=function(model,dades){
+  s=frequency(get(model$series))
+  resid=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resid,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resid,breaks=20,freq=F)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #ACF & PACF of square residuals 
+  par(mfrow=c(1,2))
+  acf(resid^2,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid^2,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+    
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:20])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:20])
+  
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resid(model)))
+  
+  #Sample ACF vs. Teoric ACF
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  acf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample ACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36),ylim=c(-1,1), 
+       type="h",xlab="Lag",  ylab="", main="ACF Teoric")
+  abline(h=0)
+  
+  #Sample PACF vs. Teoric PACF
+  pacf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample PACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36, pacf=T),ylim=c(-1,1),
+       type="h", xlab="Lag", ylab="", main="PACF Teoric")
+  abline(h=0)
+  par(mfrow=c(1,1))
+}
+
+# Forecasting
+
+fRMSE<-function(obs,pr){
+  sqrt(sum((obs-pr)^2)/12)
+}
+
+fMAE<-function(obs,pr){
+  sum(abs(obs-pr))/12
+}
+fRMSPE<-function(obs,pr){
+  sqrt(sum(((obs-pr)/obs)^2)/12) 
+}
+fMAPE<-function(obs,pr){
+  sum(abs(obs-pr)/obs)/12 
+}
+fCI<-function(tu,tl){
+ mean(tu-tl) 
+}
+```
+
+## GDPUSAvar: Gross Domestic Product variation in USA
+
+```{r}
+serie=ts((read.table("gdpUSAvar.dat",header=F)),start=1990,freq=4)
+```
+
+#### 1) If we propose an ARMA(2,0) and an ARMA(1,1), the second is a better model
+
+Answer: $FALSE$
+
+To assess whether a model is better than other, we need to carry on the validation of the two models proposed and the computation of model selection measures based on other criteria (explained after). This is because in case one of the models is not valid, then we can be sure that it will not be better than a valid model. We do not include the validation of both models for the sake of brevity (the exercise does not demand them), even though it has been carried on and it is commented.
+
+```{r}
+model_ar2=arima(serie,order=c(2,0,0))
+model_arma=arima(serie,order=c(1,0,1))
+```
+
+The results of the validation for the first model show how the residuals behave like a white noise and that homoskedasticity (checked through squared residuals), independence of lags (checked through the Ljung-Box statistic) do hold, but normality (checked through normality tests and histograms) does not. 
+
+Meanwhile, the results from the validation analysis in the second model are merely the same as with the previous model. All in all, both models seem to be valid, showing homoskedasticity (no volatiliy) and independence of lags, but having some normality problems. These latter problems might be due to a possible outlier, which can be detected at the left of the distribution, so we can think about a series that does not contain that observation. We can also check how all the coefficients are significant at the 5% significance level, which indicates no parameter should be eliminated.
+
+```{r}
+abs(model_ar2$coef/sqrt(diag(model_ar2$var.coef)))
+abs(model_arma$coef/sqrt(diag(model_arma$var.coef)))
+```
+
+We can now defend which model is best by using different measures related to goodness of fit and forecasting. To compute forecasting measures, we first need to compute forecasts and confidence intervals, so we compute the forecasts for the last 12 observations (we do not show them for the sake of brevity, but are available at the appendix).
+
+```{r, include=FALSE}
+# Predictions
+ultim=c(2016,4)
+
+predar2=predict(model_ar2,n.ahead=12)
+prar2<-ts(c(tail(serie,1),predar2$pred),start=ultim,freq=4)
+sear2<-ts(c(0,predar2$se),start=ultim,freq=4)
+
+predarma=predict(model_arma,n.ahead=12)
+prarma<-ts(c(tail(serie,1),predarma$pred),start=ultim,freq=4)
+searma<-ts(c(0,predarma$se),start=ultim,freq=4)
+
+#Intervals
+tlar2<-ts(prar2-1.96*sear2,start=ultim,freq=4)
+tuar2<-ts(prar2+1.96*sear2,start=ultim,freq=4)
+prar2<-ts(prar2,start=ultim,freq=4)
+
+tlarma<-ts(prarma-1.96*searma,start=ultim,freq=4)
+tuarma<-ts(prarma+1.96*searma,start=ultim,freq=4)
+prarma<-ts(prarma,start=ultim,freq=4)
+```
+
+```{r}
+obs=window(serie,start=ultim)
+resul=data.frame(
+  Sigma2Z=c(model_ar2$sigma2, model_arma$sigma2),
+  AIC=c(AIC(model_ar2), AIC(model_arma)),
+  BIC=c(BIC(model_ar2), BIC(model_arma)),
+  RMSE=c(fRMSE(obs,prar2),fRMSE(obs,prarma)),
+  MAE=c(fMAE(obs,prar2),fMAE(obs,prarma)),
+  RMSPE=c(fRMSPE(obs,prar2),fRMSPE(obs,prarma)),
+  MAPE=c(fMAPE(obs,prar2),fMAPE(obs,prarma)),
+  CI_Length=c(fCI(tuar2,tlar2),fCI(tuarma,tlarma)))
+row.names(resul)=c("AR(2)","ARMA(1,1)")
+resul
+```
+
+Using these metrics, we can see how that the balance between goodness of fit and the complexity (given by the AIC and the BIC) seem to favour the AR(2) model, while some metrics for forecasting such as RMSE, MAE, RMSPE, MAPE and the mean length of the CI would indicate the ARMA(1,1) model is better, as the precision and the confidence of the forecasts would be slightly higher. However, looking at the measures jointly, we can see that the AR(2) seems to have a better fit and more or less the same forecasting precision and accuracy as the ARMA(1,1), so we can say that the ARMA(1,1) is not a better model than the AR(2).
+
+We finally highlight that, even though we favour the AR(2) model, both are quite similar. 
+
+#### 2) The fitted ARMA(1,1) model is stationary and invertible
+
+Answer: $TRUE$
+
+When assesing the stationarity and invertibility of the model, it is necessary to use the polinomical form of the model, which is the following:
+
+$$
+(1-0.7008B)x_t=(1-0.3789B)w_t
+$$
+
+To assess stationarity of the model, we can check the roots of the AR polynomial
+
+$$
+1-0.7008B=0 \rightarrow B=\frac{1}{0.7008}
+$$
+$$
+\left|\frac{1}{0.7008}\right|>1 \rightarrow Stationarity
+$$
+
+Because of the absolute value of the root of the AR polynomial is greater than one, we can confirm that the ARMA(1,1) model is stationary.
+
+Now, for the invertibility, we can check the roots of the MA polynomial.
+
+$$
+1-0.3789B=0 \rightarrow B=-\frac{1}{0.3789}
+$$
+$$
+\left|-\frac{1}{0.3789}\right|>1 \rightarrow Invertible
+$$
+
+Because of the absolute value of the root of the MA polynomial is greater than one, we can confirm that the ARMA(1,1) model is stationary and invertible.
+
+## EURODOL: Monthly Average Dolar/Euro exchange
+
+#### 3) Although the mean is seemingly not constant, valid stationary-ARMA models can be fitted to the original series
+
+Answer: $TRUE$
+
+```{r}
+serie=ts((read.table("eurodol.dat")),start=1995,freq=12)
+```
+
+In order to see whether this could be the case, we first do some exploratory analysis of the original series to see whether it needs modifications for stationarity and then we estimate different models to see if the possible models that are estimated can be valid and stationary.
+
+Looking at the original series, one can observe that the variance seems to be constant and that there is no seasonal pattern to consider. However, the mean function seems to be more or less constant in the graph, but the ACF indicates that there might be non-stationarity (so the mean is not constant).
+
+```{r}
+m=apply(matrix(serie,ncol=25),2,mean)
+v=apply(matrix(serie,ncol=25),2,var)
+
+par(mfrow=c(2,1))
+plot(v~m,main="Mean-Variance plot")
+plot(serie, ylab = "USD/EUR")
+abline(h=mean(serie),col=2)
+par(mfrow=c(1,1))
+monthplot(serie)
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+```
+
+Hence, there are two cases: one in which the mean is assumed to be constant and stationary models can be used, and one in which the series is not stationary and one needs to use non-stationary models such as ARIMA models. In fact, the constant assumption seems not too adequate.
+
+We just focus on the first case, so that we can analyze the validity of the models proposed (not considering ARIMA models nor ARMA models with differenciated series). From the ACF and the PACF, we can clearly identify an AR(2) model, which is stationary because all AR models are.
+
+```{r}
+par(mfrow=c(1,2))
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+pacf(serie,ylim=c(-1,1),lag.max=60,col=c(rep(1,11),2))
+
+mod_ar2 <- arima(serie,order=c(2,0,0))
+```
+
+Finally, we check the validity of the model through the validation function. When checking the residuals, one can detect that the squared residuals could indicate the presence of volatility (it is a financial time series), but the general behaviour, the normality and independence of the residuals seem to indicate that the model could be validated. Moreover, comparing with the validation of other non-stationary models (not shown), one could see that the results are merely the same. Hence, we could validate this model, and we can say that we could obtain valid stationary-ARMA models assuming a constant mean, even though it is not (apparently).
+
+## PreuIndEner: Monthly Energy Price in Industry in Spain
+
+```{r}
+serie=ts(read.table("preuIndEner.dat"),start=2000,freq=12)
+```
+
+#### 4) This monthly series has a seasonal component and therefore, for the original series, we have to identify a regular and a seasonal part for the model
+
+Answer: $FALSE$
+
+To check the presence of a seasonal component, we should use a monthplot. In this case, we can see that there is a slight increase in the median level starting in May and extending until October, where it begins to decrease.
+
+```{r}
+serie=log(serie); monthplot(serie)
+```
+
+Nevertheless, the identification step allows as to see that there are no significant seasonal lags, so that we do not need to specify the seasonal part of the ARIMA model (even though it would be necessary if there were significant seasonal lags). We first detect that this series needs one differentiation to obtain stationarity (the ACF and the PACF to detect this are not shown), and then we can obtain the ACF and PACF of the stationary time series to check that this is in fact the situation: no seasonal lag except the very first one is significant. 
+
+```{r}
+d1serie=diff(serie);var(d1serie);var(diff(d1serie))
+
+par(mfrow=c(1,2))
+acf(d1serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+pacf(d1serie,ylim=c(-1,1),lag.max=60,col=c(rep(1,11),2))
+```
+
+## EURIBOR: Euro Interbank Offered Rate
+
+```{r}
+serie=ts((read.table("euribor.dat")),start=1999,freq=12)
+```
+
+#### 5) It seems that two regular differentiations are needed to transform the series into a stationary one
+
+Answer: $TRUE$
+
+To assess whether a second differentiation is needed, we transform using a logarithmic transformation (because variance is not constant) and, because there is no clear seasonal pattern, we can proceed checking the stationarity of the time series. One can observe that the series clearly needs a differentiation to obtain stationarity.
+
+```{r}
+serie=log(serie+1)
+par(mfrow=c(1,2))
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+pacf(serie,ylim=c(-1,1),lag.max=60,col=c(rep(1,11),2))
+```
+
+Hence, to know how many differentiations should we use, we differentiate the series iteratively and check the variance at each step. If the variance increases, that means that the previous number of differences is enough. In this case, we can check that the variance decreases until the third difference, where it increases. Hence, we can see that a two differences is enough to transform the series to a stationary series.
+
+```{r}
+var(serie)
+d1serie=diff(serie);var(d1serie)
+d1d1serie=diff(d1serie);var(d1d1serie)
+d1d1d1serie=diff(d1d1serie);var(d1d1d1serie)
+```
+
+#### 6) The once-differenced (d=1) log-transformed-series has a non-significant mean, and thus when fitting an AR(1) process, it is always better to drop this parameter (intercept) from the model
+
+Answer: $TRUE$
+
+To answer this question, we first need to estimate an AR(1) model and see whether the model is significant or not at certain significance levels. Estimating the model, we can see that the intercept is not significant at any common significance level, so this intercept could be eliminated from the model.
+
+```{r}
+mod_ar1=arima(d1serie,order=c(1,0,0))
+abs(mod_ar1$coef/sqrt(diag(mod_ar1$var.coef)))
+```
+
+Given that the expression for this model is $x_t=(1-\phi)\mu+\phi x_{t-1}+w_t$ and the $\phi$ parameter would be significant in this case, the non-significance of this model comes from the mean, and we could obtain a model which does not include this parameter, such as an ARIMA(1,1,0) for the original time series. Hence, it is recommended not to include the intercept for an AR(1) model (it does not give any additional information as it is just a location shift)
+
+#### 7) When fitting an ARIMA(0, 2, 5) to the original series, the residuals are reasonably correct and thus we validate the model
+
+Answer: $FALSE$
+
+In order to determine whether the behaviour of residuals is correct, we can check them through the validation function.
+
+```{r}
+mod_arim25=arima(serie,order=c(0,2,5))
+validation(mod_arim25,d1d1serie)
+```
+
+In the graphs, one can see that there seems to be some problems with the normality of the residuals, as observations at the extremes do not follow normal distribution tails, and the normality tests reject the normality hypothesis. Even though the a possible outlier preesent in the data is removed, we think that the normality problems would stay the same. When checking for homoskedasticity, we can see that there is no clear presence of volatility, even though there are some significant lags at the beginning, which may indicate the opposite. Finally, we can see that there is independence between lags. Consequently, we cannot say that the model is fully valid as the normality assumption might not hold and there could be volatility.
+
+## Atur: Unemployed registered people in Spain
+
+```{r}
+serie=window(ts(read.table("atur.dat")/1000,start=1996,freq=12),start=1996)
+```
+
+#### 8) For the log-transformed series, the $ARIMA(1,1,1)(0,1,1)_{12}$ is better than the $ARIMA(0,2,1)(0,1,1)_{12}$ model
+
+Answer: $FALSE$
+
+In order to determine which model is better, we can first see the validity of both models and then check some measures to compare the models when it comes to goodness of fit and forecasting ability.
+
+We first estimate both models using the logarithmic transformation, as it is needed due to a non-constant variance.
+
+```{r}
+lnserie=log(serie)
+mod1=arima(lnserie,order=c(1,1,1),seasonal=list(order=c(0,1,1),period=12))
+mod2=arima(lnserie,order=c(0,2,1),seasonal=list(order=c(0,1,1),period=12))
+```
+
+Now, we can check the validity of both models through the validation function. For the sake of brevity, we omit to show the graphs (as validation is not demanded), but we see that the behaviour of both models are pretty similar: both models cannot be fully validated because the residuals do not behave as a white noise. Independence of some lags is not me and volatility seems to be present. Even though normality does not seem to hold, eliminating outliers could make it hold, so that we might not reject the normality hypothesis.
+
+Therefore we will need other criteria in order to choose a model, and we use goodness of fit and forecasting measures to assess both models.
+
+```{r, include=FALSE}
+ultim=c(2018,12)
+pdq=c(1,1,1)
+PDQ=c(0,1,1)
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+
+modA=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12))
+modB=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12))
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie1,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+obs=window(serie,start=ultim)
+#########################
+
+ultim1=c(2018,12)
+pdq1=c(0,2,1)
+PDQ1=c(0,1,1)
+
+serie21=window(serie,end=ultim)
+lnserie21=log(serie2)
+serie11=window(serie,end=ultim+c(1,0))
+lnserie11=log(serie1)
+
+modA1=arima(lnserie11,order=pdq1,seasonal=list(order=PDQ1,period=12))
+modB1=arima(lnserie21,order=pdq1,seasonal=list(order=PDQ1,period=12))
+
+pred1=predict(modB1,n.ahead=12)
+pr1<-ts(c(tail(lnserie21,1),pred1$pred),start=ultim1,freq=12)
+se1<-ts(c(0,pred1$se),start=ultim1,freq=12)
+
+#Intervals
+tl1<-ts(exp(pr1-1.96*se1),start=ultim1,freq=12)
+tu1<-ts(exp(pr1+1.96*se1),start=ultim1,freq=12)
+pr1<-ts(exp(pr1),start=ultim1,freq=12)
+
+obs1=window(serie,start=ultim1)
+```
+
+```{r}
+resul=data.frame(
+  Sigma2Z=c(mod1$sigma2, mod2$sigma2),
+  AIC=c(AIC(mod1), AIC(mod2)),
+  BIC=c(BIC(mod1), BIC(mod2)),
+  RMSE=c(fRMSE(obs,pr),fRMSE(obs1,pr1)),
+  MAE=c(fMAE(obs,pr),fMAE(obs1,pr1)),
+  RMSPE=c(fRMSPE(obs,pr),fRMSPE(obs1,pr1)),
+  MAPE=c(fMAPE(obs,pr),fMAPE(obs1,pr1)),
+  CI_Length=c(fCI(tu,tl),fCI(tu1,tl1)))
+row.names(resul)=c("Mod1","Mod2")
+resul
+````
+
+The results show that the $ARIMA(1,1,1)(0,1,1)_{12}$ model seems to have a better goodness of fit than the $ARIMA(0,2,1)(0,1,1)_{12}$ model, but the latter has a better properties regarding forecasting, as it has more precision and accuracy and a smaller error. Because time series model are normally used for forecasting purposes, we prefer better forecasting features and hence we choose the $ARIMA(0,2,1)(0,1,1)_{12}$ model over the $ARIMA(1,1,1)(0,1,1)_{12}$ one.
+
+#### 9) The $ARIMA(1,1,1)(0,1,1)_{12}$ model for the series of logarithms is clearly stable
+
+Answer: $TRUE$
+
+In order to check the stability, we first need to check whether the model is merely the same when changing the window of observations.
+
+```{r}
+ultim=c(2018,12)
+pdq=c(1,1,1)
+PDQ=c(0,1,1)
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+
+(modA=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+```
+
+As we can see here, the coefficients are quite similar and there are no notable differences, so we can say that the model is stable.
+
+#### 10) All the coefficients of the $ARIMA(8,1,0)(0,1,1)_{12}$ model are significant
+
+Answer: $FALSE$
+
+To check whether this is true or notm we can obtain the Z values for each coefficient in the following way, and see whether the values are lower than the common critical values for the common significance levels:
+
+```{r}
+mod3=arima(lnserie,order=c(8,1,1),seasonal=list(order=c(0,1,1),period=12))
+abs(mod3$coef/sqrt(diag(mod_ar1$var.coef)))
+```
+
+In this case, we can see how the seventh autorregreive coefficients is not significant at all common significance levels, and hence we can assure that not all coefficients of the model are significant.
+
+## EnerUSA: Total Primary Energy Consumption in USA
+
+```{r}
+serie=ts(read.table("EnerUSA.dat", header=F)/1000,start=1995,freq=12)
+```
+
+#### 11) The variance of the series increases with its level (mean), so we should take logarithms
+
+Answer: $FALSE$
+
+To assess the necessity of the logarithmic transformation, we need to plot the mean versus the variance and a boxplot. In this case, the first plot does not make clear whether variance increases with the mean, even though higher points are more common with higher values of the mean (but there are also similar variance values as with low levels). The second plot allows to have a better insight, and because the dispersion seems to be constant, we would not need a logarithmic transformation.
+
+```{r}
+m=apply(matrix(serie[1:(25*12)],nr=12),2,mean)
+v=apply(matrix(serie[1:(25*12)],nr=12),2,var)
+plot(m,v,xlab="Annual Means",ylab="Annual Variances",main="serie")
+boxplot(serie~floor(time(serie)))
+```
+
+#### 12) By looking at the ACF/PACF of the seasonally and regularly differenced series, an MA can be clearly identified for the seasonal part, and another MA for the regular part.
+
+Answer: $FALSE$
+
+For this question, we need to use the ACF and the PACF graphs to assess whether MA models can be identified for both the seasonal and the regular part.
+
+```{r}
+d12serie=diff(serie,12)
+par(mfrow=c(1,2), mar=c(5,4,4,5))
+acf(d12serie,ylim=c(-1,1),col=c(2,rep(1,11)),lwd=2,lag.max=72)
+pacf(d12serie,ylim=c(-1,1),col=c(rep(1,11),2),lwd=2,lag.max=72)
+```
+
+For the seasonal part, we can clearly identify and MA model because of the infinite decay of seasonal lags in the PACF, while the seasonal lags in the ACF seem to cut off at certain lags. In this part, we could use and MA(1) or MA(2). For the regular part, however, we would more likely identify an AR model, as there is a infinite decay of the regular lags in the ACF, while the regular lags in the PACF seem to cut off. For that part, we might identify an AR(2), for example. Consequently, we do not identify and MA for both the seasonal and the regular part.
+
+#### 13) The $ARIMA(0,1, 2)(0,1,2)_{12}$ model yields better punctual predictions for the last 12 observations than the $ARIMA(3,0,0)(0,1,3)_{12}$ model with an intercept.
+
+Answer: $FALSE$
+
+To obtain the answer about the quality of predictions of both models, we have to compute forecasting measures such as the RMSE, MAE, RMSPE, MAPE and the mean CI length, which allow to compare how the models forecast.
+
+Hence, we compute, again, the table we have computed in previous exercises. Likewise, we do not show the computation of the necessary elements for predictions, but just the results obtained by doing so.
+
+```{r, include=FALSE}
+ultim=c(2018,12)
+pdq=c(0,1,2)
+PDQ=c(0,1,2)
+serie2=window(serie,end=ultim)
+modA=arima(serie,order=pdq,seasonal=list(order=PDQ,period=12))
+modB=arima(serie2,order=pdq,seasonal=list(order=PDQ,period=12))
+
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(serie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(pr-1.96*se,start=ultim,freq=12)
+tu<-ts(pr+1.96*se,start=ultim,freq=12)
+pr<-ts(pr,start=ultim,freq=12)
+
+obs=window(serie,start=ultim)
+
+#############
+
+ultim1=c(2018,12)
+pdq1=c(3,0,0)
+PDQ1=c(0,0,3)
+
+serie21=window(serie,end=ultim1)
+d12serie21=diff(serie21,12)
+
+modA1=arima(d12serie,order=pdq1,seasonal=list(order=PDQ1,period=12))
+modB1=arima(d12serie21,order=pdq1,seasonal=list(order=PDQ1,period=12))
+pred1=predict(modB1,n.ahead=12)
+
+pr1<-window(diffinv(pred1$pred,12,xi=window(serie,start=ultim1+c(-1,1),end=ultim1+c(0,0))),start=ultim1)
+model1<-modB1$model
+varZ1<-modB1$sigma
+ma1<-ARMAtoMA(ar=modB1$phi,ma=modB1$theta,lag.max=11)
+se1<-c(0,sqrt((cumsum(c(1,ma1))^2)*varZ1))
+
+#Intervals
+tl1<-ts(pr1-1.96*se1,start=ultim1,freq=12)
+tu1<-ts(pr1+1.96*se1,start=ultim1,freq=12)
+pr1<-ts(pr1,start=ultim1,freq=12)
+
+obs1=window(serie,start=ultim1)
+```
+
+```{r}
+resul=data.frame(
+  RMSE=c(fRMSE(obs,pr),fRMSE(obs1,pr1)),
+  MAE=c(fMAE(obs,pr),fMAE(obs1,pr1)),
+  RMSPE=c(fRMSPE(obs,pr),fRMSPE(obs1,pr1)),
+  MAPE=c(fMAPE(obs,pr),fMAPE(obs1,pr1)),
+  CI_Length=c(fCI(tu,tl),fCI(tu1,tl1)))
+row.names(resul)=c("ARIMA(0,1, 2)(0,1,2)","ARIMA(3,0,0)(0,1,3)")
+resul
+```
+
+In this case, all measures favour the $ARIMA(3,0,0)(0,1,3)_{12}$ model when it comes to precision, accuracy, error and variability of punctual forecasts (measured by the mean length of the intervals). In this case, lower values indicate a better performance, so we can say that this model is better than the $ARIMA(0,1, 2)(0,1,2)_{12}$ model.
+
+## APB: Mercantile Activity in the Port of Barcelona
+
+```{r}
+serie=window(ts(read.table("apb.dat")[,1]/1000,start=1997,freq=12),start=2000)
+```
+
+#### 14) The forecasts from the $ARIMA(0,1,1)(0,1,1)_{12}$ model for the last year are correct.
+
+Answer: $TRUE$
+
+In order to answer this question, we first need to estimate the model. We use a logarithmic transformation to estimate the model because of non-constant variance issues.
+
+```{r}
+lnserie=log(serie)
+mod1=arima(lnserie,order=c(0,1,1),seasonal=list(order=c(0,1,1),period=12))
+```
+
+Once estimated, we proceed to do the forecasts for the model. We represent these punctual forecasts and their confidence interval in the following plot.
+
+```{r,include=FALSE}
+ultim=c(2018,12)
+pdq=c(0,1,1)
+PDQ=c(0,1,1)
+
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+
+mod1A=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12))
+mod1B=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12))
+
+pred=predict(mod1B,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=12)
+
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+obs=window(serie,start=ultim)
+
+```
+
+```{r}
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-3,+2),type="o",main="Model ARIMA(0,1,1)(0,1,1)")
+abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+As we can see, the forecasts are not exactly the observations, but this is logical. In order to give a better sense of the accuracy and precision for the forecast, we present the RMSPE and the MAPE.
+
+```{r}
+RMSPE=sqrt(sum(((obs-pr)/obs)^2)/12)
+MAPE=sum(abs(obs-pr)/obs)/12
+data.frame("RMSPE"= RMSPE,"MAPE"=MAPE)
+```
+
+From the results we can clearly see that the model is quite precise and accurate, having very low values for the different errors. The values forecasted are near the real ones and inside the confidence bands.
+
+#### 15) The Ljung-Box statistics for the previous model have p-values higher than 0.05 for all the lags, and that implies that the model is valid
+
+Answer: $FALSE$
+
+Finally, to answer the question we would need to use the validation function used in previous exercises. In order to use it, we do a seasonal and a regular difference to the logarithmic series, so that we work with a stationary series.
+
+```{r}
+d1d12lnserie=diff(diff(lnserie,12))
+validation(mod1,d1d12lnserie)
+```
+
+From the results, one can clearly see that the Ljung-Box statistics are all above 0.05. However, time series models as the ones we work with do not need to be validated if other assumptions made on the models do not hold, such as normality or homoskedasticity. In this case, for example, normality is mostly holding (because of a single outlier that could be removed) and there is no sign of volatility, so we would validate this model. But, because of the Ljung-Box statistics above the significance level not being a sufficient condition to say that a model is valid, we would say this claim is false.

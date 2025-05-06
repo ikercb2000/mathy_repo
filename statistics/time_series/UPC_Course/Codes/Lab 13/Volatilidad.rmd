@@ -1,0 +1,175 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+## Volatilidad Estocástica
+
+```{r}
+library(quantmod,warn.conflicts = FALSE,quietly = TRUE)
+library(astsa,warn.conflicts = FALSE,quietly = TRUE)
+
+options("getSymbols.warning4.0"=FALSE)
+tick="AAPL"
+getSymbols(tick)
+valor=get(tick)
+
+chart_Series(valor)
+
+Preu=ts(valor[,4])
+summary(Preu)
+plot(Preu)
+```
+
+Plot de los rendimientos (1-B)log(Pt)
+
+```{r}
+ret=ts(diff(log(Preu))[-1])
+num=length(ret)
+plot(ret)
+```
+
+## Modelo de Espacio de Estado de la Volatilidad Estocástica: Observaciones
+
+Plot dels logaritmes dels rendiments al quadrat log(ret^2)
+```{r}
+y=log(ret^2+1e-7)
+plot(y,ylab="log(r^2)")
+```
+
+Parámetros iniciales
+
+```{r}
+phi0= 0
+phi1=.95
+sQ=.2
+alpha=mean(y,na.rm=T)  
+sR0=1
+mu1=-3
+sR1=2
+initpar=c(phi0,phi1,sQ,alpha,sR0,mu1,sR1)
+```
+
+Evaluación de la verosimilitud de la volatilidad Estocástica. Utiliza la función SVFilter del package "astsa" que aproxima la distribución del logaritmo de una Chi-cuadrado con un grado de libertad por la mixtura equilibrada ($\pi=0.5$) de dos componentes gausianas, una de ellas centrada en el cero.
+
+```{r}
+
+Linn=function(para){
+phi0=para[1]
+phi1=para[2]   
+sQ=para[3]
+alpha=para[4]
+sR0=para[5]
+mu1=para[6]   
+sR1=para[7]
+sv = SVfilter(num,y,phi0,phi1,sQ,alpha,sR0,mu1,sR1)
+return(sv$like)
+}
+```
+
+Estimación usando un algoritmo de optimización no-lineal
+```{r}
+est=optim(initpar, Linn, NULL, method = "BFGS", hessian = TRUE, control=list(trace=1,REPORT=1))
+ stderr=sqrt(diag(solve(est$hessian)))
+ est   # for a summary
+ cbind(est$par,stderr)  # list estimates and SEs
+```
+
+```{r}
+phi0=est$par[1]
+phi1=est$par[2]   
+sQ=est$par[3]
+alpha=est$par[4]
+sR0=est$par[5]
+mu1=est$par[6]   
+sR1=est$par[7]
+sv = SVfilter(num,y,phi0,phi1,sQ,alpha,sR0,mu1,sR1)
+
+#Graph de la volatilitat vs. Valors originals
+par(mar=c(3,3,1,1))
+par(mfrow=c(2,1))
+plot(Preu,main=paste(tick,"Preus"),ylab="")
+pred=exp(unlist(sv$xp)/2)
+ts.plot(pred, main="Predicted Volatility (sigma(t))", ylim=c(0,max(pred)), ylab="")
+abline(h=1,lty=2)
+```
+
+```{r}
+#Graph de la volatilitat vs. Rendiments
+par(mfrow=c(2,1))
+plot(ts(ret), main="Returns", ylab="")
+ts.plot(pred, main="Predicted Volatility (sigma(t))", ylim=c(0,max(pred)), ylab="")
+abline(h=1,lty=2)
+```
+
+```{r}
+#Graph de la volatilitat vs. valors observats (log(ret^2))
+par(mfrow=c(1,1))
+plot(y-alpha, type="l", main=paste(tick,"Returns"), ylab="")
+lines(sv$xp, col=2)
+```
+```{r}
+
+#Residus del model per a sigma
+resid=y-alpha-sv$xp
+ts.plot(resid)
+hist(resid)
+qqnorm(resid)
+```
+```{r}
+
+
+#### Modelo GARCH
+
+library(tseries)
+mod.garch=garch(ret)
+summary(mod.garch)
+resid=mod.garch$resid[-1]
+par(mfrow=c(2,3))
+hist(resid,prob=T,col=4,main="Histograma dels residus")
+curve(dnorm(x,mean(resid,na.rm=T),sd(resid,na.rm=T)),col=2,add=T)
+
+acf(resid,ylim=c(-0.5,0.5),lag.max=30,main="ACF dels residus",na.action=na.omit)
+
+acf(resid^2,ylim=c(-0.5,0.5),lag.max=30,main="ACF dels residus^2",na.action=na.omit)
+
+
+
+#ts.plot(resid,main="Residus")
+abline(h=0,col=2)
+qqnorm(resid,main="Normal-Plot dels residus")
+qqline(resid,col=2)
+pacf(resid,ylim=c(-0.5,0.5),lag.max=30,main="PACF dels residus",na.action=na.omit)
+pacf(resid^2,ylim=c(-0.5,0.5),lag.max=30,main="PACF dels residus^2",na.action=na.omit)
+```
+```{r}
+
+
+#comparació estimació de la volatilitat Garch i Estocàstica
+
+
+vol.garch=mod.garch$fitted.values[-1,1]
+vol.stoch=exp(unlist(sv$xp+alpha)/2)
+
+par(mfrow=c(2,1))
+par(mar=c(3,3,1,1))
+lsup=max(vol.garch,vol.stoch)
+plot(Preu,type="l", main=paste(tick,"Preus"),ylab="")
+plot(ts(vol.garch),main=paste("Volatility(",tick,")",sep=""),col=4,ylim=c(0,lsup),ylab="sigma_t")
+lines(vol.stoch,col=2)
+legend(0, lsup,c("garch","stoch"), lty=1, lwd=2, col=c(4,2), cex=0.8)
+
+
+```
+
+```{r}
+ts.plot(ret)
+lines(3*vol.garch,lty=3,col=4)
+lines(-3*vol.garch,lty=3,col=4)
+```
+
+```{r}
+ts.plot(ret)
+lines(3*vol.stoch,lty=3,col=2)
+lines(-3*vol.stoch,lty=3,col=2)
+```

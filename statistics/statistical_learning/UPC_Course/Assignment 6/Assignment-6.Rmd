@@ -1,0 +1,306 @@
+
+---
+title: 'Assignment 6: Smoothing and regression splines: Bikes in Washington'
+author: "Alejandro Peraza, Iker Caballero, Miguel Benítez"
+date: "2023-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(splines)
+library(tidyr)
+```
+
+### Exercise 1
+
+In this exercise we estimate the regression function m(instant) of cnt as a function of instant using a cubic regression splines.
+
+```{r, echo = FALSE}
+load("bikes.Rdata")
+#cnt <- scale(bikes$cnt, center = TRUE, scale = FALSE)
+#instant <- scale(bikes$instant)
+cnt=bikes$cnt
+instant = bikes$instant
+```
+
+First, we load the two variables of interest. Then, we use the `smooth.spline` function to fit the cubic smoothing spline. We indicate the variables and set the argument `cv`=FALSE. This forces the estimation of $\lambda$ using GCV. We do not set any specific set of knots.
+
+In the following table we observe the results of the regression. The $\lambda$ which minimized the prediction error was approximately 0, which implies a very low penalization for lack of smoothness of the splines. Therefore, the equivalent degrees of freedom were high (93.34). The number of knots used was 731, which coincided with the number of points in the data.
+
+```{r}
+cubic.reg.spline <- smooth.spline(x = instant, y = cnt, cv = FALSE)
+```
+
+```{r,echo=FALSE}
+tibble(data.frame(lambda = cubic.reg.spline$lambda, 
+                 edf = round(cubic.reg.spline$df,2), 
+                 n.knots = cubic.reg.spline$n)) %>% 
+  knitr::kable(.)
+```
+
+The values observed will result in a very flexible spline regression, which may be observed in the plot below.
+
+```{r, echo=FALSE}
+plot(instant, cnt,pch=16,cex=0.5,col="red")
+lines(cubic.reg.spline, col = "blue", lwd = 3)
+```
+
+Due to the low penalization, the obtained regression is not very different from an unpenalized one. To observe this, we fit one using the code provided in `Splines_4_Spline_smoothing_countries_data.Rmd`, and following the instructions of section e of this assignment. Then, we plot the results of this regression vs the previous one. 
+
+```{r}
+k <- 3; x <- instant; y <- cnt #inputs
+n.knots <- cubic.reg.spline$df - 4 #instructions section e
+my.knots <- quantile(instant,((1:n.knots)-.5)/n.knots) #instructions section e
+
+# Create a basis
+basis <- bs(x=x,knots=my.knots,intercept=T,degree=k)
+
+# Unpenalized regression using the basis
+lm.spl <- lm(y~basis)
+```
+
+```{r,echo=FALSE}
+# Plotting results
+plot(x,y,col=2,xlab="instant",ylab="cnt",pch=16,cex=0.5)
+lines(x,lm.spl$fitted.values, col = "green", lwd = 2)
+abline(v=my.knots,lty=1,col="grey")
+lines(cubic.reg.spline, col = "blue", lwd = 2)
+legend("topleft", legend = c("Cubic Regression Spline", 
+                             "Unpenalized Cubic Regression Splines"),
+       col = c("blue", "green"), lty = c(1,1), lwd = 2)
+```
+
+### Exercise 2
+
+##### Section A
+
+In this exercise we are asked to compute a non-parametric logistic regression using splines with a IRWLS procedure through the function defined in `IRWLS logistic regression.R`.To do so, we first create the binary variable specified in the instructions.
+
+```{r}
+bikes$cnt.5000 <- ifelse(bikes$cnt>=5000,1,0)
+```
+
+Then, we load the function `logistic.IRWLS.splines` from Atenea (available in the Annex) in order to estimate the non-parametric regression for "cnt.5000" on "temp". We also print plots in order to visually understand the estimation through the IRWLS algorithm.
+
+```{r, echo = FALSE}
+# logistic.IRWLS.splines function
+
+logistic.IRWLS.splines <- function(x,y,weights.out=1,x.new=x,
+                           df=6,spar=NULL, 
+                           all.knots = FALSE, nknots = .nknots.smspl,  
+                           max.iter=10,eps.beta=1e-5,
+                           plts=FALSE){
+  if (plts&(dim(as.matrix(x))[2]>1)){
+    plts<-FALSE
+    warning("Plots are valid only when dim(x)[2]==1")
+  }
+  
+  stop.rule <- FALSE
+  iter <- 0
+  theta.0 <- fitted(lm(y~x)) 
+  
+  while (!stop.rule){
+    iter <- iter + 1 
+    
+    p <- p.from.theta(theta.0)
+    ps.e <- (y-p)/(p*(1-p))
+    z <- theta.0 + ps.e 
+    wt <- p*(1-p) *weights.out
+    
+    if (plts){
+      op<-par(mfrow=c(1,2))
+      plot(x,y,cex=8*wt)
+      lines(x,p,col=2)
+      plot(x,z,cex=8*wt)
+      lines(x,theta.0,col=2)
+      par(op)
+    }
+    
+    spline.1 <- smooth.spline(x,z,w=wt,df=df,spar=spar,
+                              all.knots = all.knots,
+                              nknots = nknots) 
+    theta.1 <- predict(spline.1,x=x)$y
+    
+    if ((iter>=max.iter)|(sum((theta.1-theta.0)^2)<eps.beta)){
+      stop.rule<-TRUE
+    } else {
+      theta.0 <- theta.1
+    }
+  }
+  
+  p <- p.from.theta(theta.1)
+  resid.devi <- sum(-2*dbinom(y,1,p,log=TRUE))
+  
+  return(list(fitted.values=p,
+              theta.x=theta.1,
+              df=spline.1$df,
+              predicted.values=p.from.theta(predict(spline.1,x=x.new)$y),
+              residual.deviance=resid.devi)
+  )
+}
+
+# p.from.theta function
+
+p.from.theta <- function(theta.x){
+  p.x <- 1/(1+exp(-theta.x))
+  return(p.x)
+}
+```
+
+```{r}
+# Non-parametric logistic regression estimation through IRWLS
+log_spline <- logistic.IRWLS.splines(bikes$temp,bikes$cnt.5000,plts=TRUE)
+```
+
+From the graphs shown above, we can see how the algorithm starts fitting a straight line to the data, but then quickly converges over and over to a curve which is increasing until temp=25 (approximately) and then decreases afterwards.
+
+The range for which P(cnt>=5000|temp)>0.5 can be obtained through the fitted values of the estimated regression. We first join the fitted values to each observation in the dataset and then we obtain the temperatures of those observations which accomplish P(cnt>=5000|temp)>0.5. The minimum and maximum temperatures determine the boundaries of the range.
+
+```{r}
+# Range obtention
+fit.log <- log_spline$fitted.values
+bikes$fit.log <- fit.log 
+temp_05 <- bikes$temp[bikes$fit.log>0.5]
+paste0("The range of temp for which P(cnt>=5000|temp)>0.5 goes from ",round(min(temp_05),2)," to ",round(max(temp_05),2))
+```
+
+##### Section B
+
+To choose the parameter df through k-fold log-likelihood cross validation, we first need to define a function (`loglikCVdf`), which chooses the optimal df through k-fold cross-validation, according to the max log likelihood criterion. `loglikCVdf` uses the data, the number of knots, and a vector of potential values for degrees of freedom as input. It returns the log likelihood associated to each potential value and the best $\lambda$. `loglikCVdf` uses another auxiliary function `logit`. `logit` takes some data and the potential values of df as input. Using `logistic.IRWLS.splines` the log likelihood value of each df is returned.
+
+```{r}
+loglik_KCV_df = function(X, Y, k, dfs, seed){
+  set.seed(seed)
+  # Splitting the data into k groups 
+  indexes = matrix(0,nrow=dim(X)[1]/k,ncol=k) #Each column is one sub-sample
+  numbers = 1:dim(X)[1]
+  for (i in 1:k){
+    ind = sample(numbers,dim(X)[1]/k,replace = FALSE)
+    indexes[,i] = ind
+    numbers = setdiff(numbers,ind)
+  }
+  # Creating a matrix of loglikelhoods
+  loglik_matrix <- matrix(0, nrow=length(dfs), ncol=k)
+
+  #Each column is the loglikelihoods for each df associated to one of the k samples
+  for (i in 1:k){
+    training_X = X[indexes[,-i],]
+    test_X = X[indexes[,-i],]
+    training_Y = Y[indexes[,-i]]
+    test_Y = Y[indexes[,-i]]
+    loglik_matrix[,i]=logit(training_X, test_X, training_Y, test_Y, dfs)
+  }
+  # Computing the mean loglikelihood associated to each df
+  dfs_loglik = apply(loglik_matrix, MARGIN = 1, FUN = mean)
+  
+  return(list("values" = dfs_loglik,"optimal df" = df.v[which.max(dfs_loglik)]))
+}
+```
+
+```{r}
+logit<-function(training_X,test_X,training_Y,test_Y,dfs){
+  loglikelihoods <- numeric(length(dfs))
+  for (i in 1:length(dfs)) {
+    mod_log <- logistic.IRWLS.splines(y=training_Y,
+                                      x=training_X, df=dfs[i],
+                                      plts=FALSE, x.new=test_X)
+    pred <- mod_log$predicted.values
+    res <- mean(test_Y*log(pred/(1-pred))+log(1-pred))
+    loglikelihoods[i] <- res
+  }
+  return(loglikelihoods)
+}
+```
+
+Now that the function is defined, we can specify k=5 and different degrees of freedom, from 3 to 15 (as requested). According to the chosen method, the best effective number of parameters is 15, the maximum of the suggested values.
+
+```{r}
+# k-fold cross validation function
+
+df.v <- 3:15
+
+cnt.5000 <- bikes[,10]
+temp <- bikes[,6]
+# loglikCVdf(x = temp, y = cnt.5000, k = 5, dfs = df.v)
+loglik_KCV_df(X = as.data.frame(temp), Y = cnt.5000, k = 5, dfs = df.v, seed = 123)
+```
+
+### Annex
+
+##### `logistic.IRWLS.splines` function
+
+```{r}
+
+logistic.IRWLS.splines <- function(x,y,weights.out=1,x.new=x,
+                           df=6,spar=NULL, 
+                           all.knots = FALSE, nknots = .nknots.smspl,  
+                           max.iter=10,eps.beta=1e-5,
+                           plts=FALSE){
+  if (plts&(dim(as.matrix(x))[2]>1)){
+    plts<-FALSE
+    warning("Plots are valid only when dim(x)[2]==1")
+  }
+  
+  stop.rule <- FALSE
+  iter <- 0
+  theta.0 <- fitted(lm(y~x)) 
+  
+  while (!stop.rule){
+    iter <- iter + 1 
+    
+    p <- p.from.theta(theta.0)
+    ps.e <- (y-p)/(p*(1-p))
+    z <- theta.0 + ps.e 
+    wt <- p*(1-p) *weights.out
+    
+    if (plts){
+      op<-par(mfrow=c(1,2))
+      plot(x,y,cex=8*wt)
+      lines(x,p,col=2)
+      plot(x,z,cex=8*wt)
+      lines(x,theta.0,col=2)
+      par(op)
+    }
+    
+    spline.1 <- smooth.spline(x,z,w=wt,df=df,spar=spar,
+                              all.knots = all.knots,
+                              nknots = nknots) 
+    theta.1 <- predict(spline.1,x=x)$y
+    
+    if ((iter>=max.iter)|(sum((theta.1-theta.0)^2)<eps.beta)){
+      stop.rule<-TRUE
+    } else {
+      theta.0 <- theta.1
+    }
+  }
+  
+  p <- p.from.theta(theta.1)
+  resid.devi <- sum(-2*dbinom(y,1,p,log=TRUE))
+  
+  return(list(fitted.values=p,
+              theta.x=theta.1,
+              df=spline.1$df,
+              predicted.values=p.from.theta(predict(spline.1,x=x.new)$y),
+              residual.deviance=resid.devi)
+  )
+}
+
+# p.from.theta function
+
+p.from.theta <- function(theta.x){
+  p.x <- 1/(1+exp(-theta.x))
+  return(p.x)
+}
+```
+
+
+## Annex 1: code
+
+### Loading data [QUITAMOS?]
+
+```{r, eval = FALSE}
+load("bikes.Washington.Rdata")
+cnt <- scale(bikes$cnt, center = TRUE, scale = FALSE)
+instant <- scale(bikes$instant)
+```

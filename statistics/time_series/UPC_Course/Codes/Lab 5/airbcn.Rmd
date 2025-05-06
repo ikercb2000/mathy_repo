@@ -1,0 +1,725 @@
+# Session 5: ARIMAX Modelling; Outliers Treatment
+
+## **AirBCN**: Monthly passengers (in thousands) of international air flights at El Prat; January 1990 – December 2019.
+
+Data come from the website of the Ministry of Public Works of Spain (www.fomento.es) in paragraph Statistical Information / Bulletin On-line / Civil Aviation / 4.2 Traffic by airports. Barcelona and correspond to the number of monthly passengers (in thousands) of international air flights at El Prat between January 1990 and December 2019.
+
+http://www.fomento.gob.es/BE/?nivel=2&orden=03000000
+
+Introductory Remarks:
+
+This Lab-session is organized in two parts:
+
+- Part I: Classical ARIMA. It applies the concepts of model identification, estimation and forecasting covered in the first four theory and lab sessions: S1-S4.
+
+- Part II: ARIMA plus an extension (outliers treatment). It extends the classical ARIMA approach, by introducing the detection and further treatment of outliers, to better analyze and predict the time series at hand.
+
+Comments/Recommendations:
+
+- Revise the Part I of this lab session and be sure to fully understand it (based on already covered sessions S1-S4).
+- Take a look of the Part II after yo have studied the theory presented in the corresponding slides/videos.
+- Be aware that in Statistic we do not have black/white answers. Take particularly this into account when interpreting results (for instance, when using statistical tests, and so on…).
+
+## I. ARIMA Model without outliers treatment
+
+### Ia) Exploratory data analysis and transformation into stationarity
+
+Import the data
+
+```{r}
+serie=window(ts(read.table("airbcn.dat")[,1]/1000,start=1990,freq=12),start=1990)
+print(round(serie,0))
+
+plot(serie,main="Miles de pasajeros de lineas aereas internacionales en el aeropuerto del Prat",ylim=c(0,4300))
+abline(v=1990:2020,col=4,lty=3)
+text(1990:2019+0.5,4200,1990:2019,cex=0.8)
+```
+
+Remarks…
+
+– Mention/describe here all known events in the period of study that might have influenced the AirBcn time series: Gulf war, Twin towers fall, financial crisis,…
+
+– Provide your general statistical impressions; for instance:
+
+  - It seems to be a seasonal component superposed to a non-constant mean behavior.
+
+  - Also, a non constant variance seems to exist. Let’s check it all…
+
+Transformation into stationarity
+
+**Is Variance constant?**
+
+See variance versus mean plot and boxplots per year:
+
+
+```{r}
+m=apply(matrix(serie,nr=12),2,mean)
+v=apply(matrix(serie,nr=12),2,var)
+plot(m,v,xlab="Medias anuales",ylab="Varianzas anuales",main="serie")
+abline(lm(v~m),col=2,lty=3,lwd=2)
+```
+
+```{r}
+boxplot(serie~floor(time(serie)))
+```
+
+A clearly non constant variance is confirmed! Thus apply a Box-Cox transformation to stabilize it: natural log
+
+```{r}
+lnserie=log(serie)
+plot(lnserie)
+```
+
+```{r}
+boxplot(lnserie~floor(time(lnserie)))
+```
+
+Now, variance looks homogeneous!
+
+**Is seasonality observed/present?**
+
+```{r}
+plot(decompose(lnserie))
+```
+
+```{r}
+monthplot(lnserie)
+```
+```{r}
+ts.plot(matrix(lnserie,nrow=12))
+```
+
+Yes, a seasonal pattern is observed; people travel more in summer, specially in august, and less at the beginning of the year. Along the year the number of international passengers seem to increase until august and then decay again to values slightly higher than those of january and february. It all makes sense!
+
+Eliminate the seasonality applying a seasonal difference $(1-B^{12})\log(X_t)$
+
+
+```{r}
+d12lnserie=diff(lnserie,12)
+plot(d12lnserie)
+abline(h=0)
+```
+
+**Is the mean constant?**
+
+Apparently not (see previous plot). Thus, apply a regular difference of order d=1 (1-B)
+
+```{r}
+d1d12lnserie=diff(d12lnserie,1)
+plot(d1d12lnserie)
+abline(h=0)
+abline(h=mean(d1d12lnserie),col=2,lwd=2)
+```
+
+Now, the mean is seemingly constant (and around 0), but try another regular difference. Check how the variances of the series change to decide if an extra difference is needed!
+
+```{r}
+
+d1d1d12lnserie=diff(d1d12lnserie,1)
+plot(d1d1d12lnserie)
+abline(h=0)
+```
+
+Check how the variances behave!
+
+```{r}
+var(lnserie)
+var(d12lnserie)
+var(d1d12lnserie)
+var(d1d1d12lnserie)
+```
+
+The extra regular difference is not needed (variance is artificially increased). Stationarity is thus achieved by double differencing the log-transformed series (one regular and one seasonal difference). Thus, $W_t=(1-B)(1-B^{12})\log X_t$
+
+with seemingly zero mean.
+Conclusion: The double differenced (d=1 and D=1) airbcn series (d1d12lnserie) is considered to be stationary: it has constant mean (seemingly=0), constant variance, and covariance structure only depending on the lags.
+
+### Ib) Model Identification
+
+Since stationarity of the series d1d12lnserie was confirmed, choose an ARIMA model for ít based on the patterns observed in the P(ACF)
+
+```{r}
+par(mfrow=c(1,2))
+acf(d1d12lnserie,ylim=c(-1,1),col=c(2,rep(1,11)),lwd=2,lag.max=72)
+pacf(d1d12lnserie,ylim=c(-1,1),col=c(rep(1,11),2),lwd=2,lag.max=72)
+par(mfrow=c(1,1))
+```
+
+Based on the patterns observed in the P(ACF), we identify as a feasible model for Wt: an MA(1) and SAR(2)!!
+
+In the sequel: P(ACF) denotes ACF and PACF
+
+### Ic) Model Fitting/Estimation
+
+Estimation begins…
+
+First, fit the identified $ARIMA(0,0,1)(2,0,0)_{12}$ process to the stationary/transformed series Wt=d1d12lnserie.
+
+Reminder: We should Check/verify if the mean/intercept is truly null (non-statistically significant intercept), or not!
+
+```{r}
+(mod=arima(d1d12lnserie,order=c(0,0,1),seasonal=list(order=c(2,0,0),period=12)))
+```
+
+See T-ratios to check significance of ML coefficients estimates:
+
+```{r}
+abs(mod$coef/sqrt(diag(mod$var.coef)))
+```
+
+
+Clearly, only the intercept (mean) is non significant.
+
+Thus, fit the non-stationary $ARIMA(0,1,1)(2,1,0)_{12}$ process to original log-transformed series: lnserie
+
+```{r}
+(mod=arima(lnserie,order=c(0,1,1),seasonal=list(order=c(2,1,0),period=12)))
+```
+
+**Remarks**
+
+- All coeffs are non-zero (found statistically significant since |T-ratios| > 2).
+- AIC decreased when the intercept was dropped; thus good decision to drop the intercept!
+
+**To do**: Provide the explicit statistical expression of the fitted ARIMA model; also report the estimated noise variance and AIC/BIC!
+
+Proceed to validate the proposed model.
+
+#### ‘Load’ the ‘validation’ function: used later
+
+```{r}
+#################Validation#################################
+validation=function(model,dades){
+  s=frequency(get(model$series))
+  resid=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resid,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resid,breaks=20,freq=FALSE)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #ACF & PACF of square residuals 
+  par(mfrow=c(1,2))
+  acf(resid^2,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid^2,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:20])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:20])
+  
+  ## Add here complementary tests (use with caution!)
+  ##---------------------------------------------------------
+  cat("\nNormality Tests\n")
+  cat("\n--------------------\n")
+ 
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resid(model)))
+
+  suppressMessages(require(nortest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(ad.test(resid(model)))
+  
+  suppressMessages(require(tseries,quietly=TRUE,warn.conflicts=FALSE))
+  ##Jarque-Bera test
+  print(jarque.bera.test(resid(model)))
+  
+  cat("\nHomoscedasticity Test\n")
+  cat("\n--------------------\n")
+  suppressMessages(require(lmtest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Breusch-Pagan test
+  obs=get(model$series)
+  print(bptest(resid(model)~I(obs-resid(model))))
+  
+  cat("\nIndependence Tests\n")
+  cat("\n--------------------\n")
+  
+  ##Durbin-Watson test
+  print(dwtest(resid(model)~I(1:length(resid(model)))))
+  
+  ##Ljung-Box test
+  cat("\nLjung-Box test\n")
+  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+    te=Box.test(resid(model),type="Ljung-Box",lag=el)
+    c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
+  
+
+  #Sample ACF vs. Teoric ACF
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  acf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample ACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36),ylim=c(-1,1), 
+       type="h",xlab="Lag",  ylab="", main="ACF Teoric")
+  abline(h=0)
+  
+  #Sample PACF vs. Teoric PACF
+  pacf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample PACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36, pacf=T),ylim=c(-1,1),
+       type="h", xlab="Lag", ylab="", main="PACF Teoric")
+  abline(h=0)
+  par(mfrow=c(1,1))
+}
+################# Fi Validation #################################
+```
+
+### Id) Model Validation
+
+#### Validate the proposed model: should be white noise!!
+
+```{r}
+dades=d1d12lnserie #stationary transformed series
+model=mod       #Fitted ARIMA model: in this case mod is ARIMA(0,1,1)(2,1,0)_12 for lnserie
+validation(model,dades)
+
+# 48 roots because because the SAR coefficients are 4 and s=12, so 4*s=48
+# It gives 3 tests of normality, with H_0: Normality
+# Ljung-Box test: All pointss should be above the line
+```
+
+#### **Validation Conclusions/Remarks**
+
+As done in practical classes; fully comment all plots/outputs:
+
+**Are the ARIMA model asumptions fulfilled? white noise (WN)?**
+
+- **Are residuals normal with zero mean and constant variance?**
+
+  – See plots and complementary statistical tests for checking normality (Shapiro-Wilks, Anderson-Darling and Jarque-Bera) and homogeiney of variance (Breusch PaganDurbin Watson).
+
+- **Does the non-correlation (independence) assumption of residuals hold?**
+
+  – Are there signs of autocorrelation on the residuals? Comment on the individual and joint tests on residuals; see (P)ACFs of residuals and anlyze the complementary statistical tests results (Durbin Watson and Ljung-Box tests).
+
+  – Are there signs of autocorrelation structure on squared residuals? Analyze the P(ACF) of squared residuals.
+
+- **Is the proposed model invertible; is it causal?**
+
+    – What does it means/implies?
+
+- **Are the sample and theoretic P(ACF) similar?**
+
+**Final conclusion? Is your proposed model reasonably valid? Justify your answer!**
+
+**Reminder:** Residuals must be WN, and thus must not cointain information: Normal, centered at zero with constant variance, and not autocorrelated (independent in case of normality).
+
+=================================================================================================================== 
+**Write your own, but the following can give you all a clear idea of possible validation conclusions and remarks**
+
+**With respect to validation:**
+
+**Residual analysis**
+
+- Normality and constant variance of residuals are reasonably fulfilled. The residuals are apparently random, though some outliers seem to be present. The Shapiro Wilks and other normality tests fail, clearly due to the presence of outliers. Maybe also due to outliers, the Breusch-Pagan test for homocedasticity is rejected.
+
+- The P(ACF) plots show some dependency at lags 4 and 11 for example (correlation structure at those lags are badly explained by the fitted model). The Durbin Watson (p-value = 0.5234) suggests, however, that no correlation is present in residuals.
+
+- The Ljung-Box test fails after lag 11, which is confirmed by the plot and tabulated results. This means that when considered jointly the correlation structure up to lag k=11 is compatible with a WNoise, but fails afterwards.
+
+The P(ACF) of squared residuals show some correlation structure that might be due either to the presence of volatility or outliers; here outliers?
+
+**Invertible? Causal?**
+
+- The proposed $ARIMA (0,1,1)(2,1,0)_{12}$ model is found invertible; the root of the regular MA-characteristic polynomial lies outside the unit circle (Modul = 2.686076 greater than one). Thus, the model can be represented as a convergent $AR(\infty)$ expression with $\pi$-weights (useful for estimating point predictions).
+
+- The model is also causal/stationary; all 24 roots of the seasonal AR-characteristic polynomial lie outside the unit circle(all with modul = 1.038014 greater than 1). Thus, the model can be represented as a convergent $MA(\infty)$ expression with $\psi$-weights(useful for estimating the variance of estimated point predictions).
+
+**The sample and theoretic ACF and PACF plots look very similar.**
+
+**Some adequacy measures: $AIC = -1117.39$, $BIC = -1101.99$, and $σ^2_Z=0.002239$
+
+.
+
+**Final remark** Outliers detection and its treatment will be desirable to achieve, and possibly, better validation results can be obtained (also calendar effects analysis should be performed). Thus, for now, we do not proceed to improve the model (fails a bit in the validation) by looking to an alternative one and decide to first take into account the treatment of outliers. **Since outliers treatment and calendar effects correction is still pending, we are rightnow less strict with validation and consider that the fitted model is reasonably valid for prediction.** ==================================================================================================================
+
+### Ie) Forecasting
+
+Use proposed $ARIMA(0,1,1)(2,1,0)_{12}$ model for predictions
+
+#### **1) Is proposed model stable? (in significance, sign and magnitud)**
+
+```{r}
+ultim=c(2018,12)
+pdq=c(0,1,1)
+PDQ=c(2,1,0)
+
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+
+(mod=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(mod2=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+```
+
+Clearly, stability of the model is fulfilled! We observe similar results in terms of significance, sign and magnitud. In practice, this means that the correlation structure has not changed in the last year, and that the use of the complete series for making predictions is reliable.
+
+**Remark:** Models adequacy can be compared via the AIC, but only when they are based on the same data and on the same scale. (For instance, you cannot compare the model based on the complete and incomplete series via the AIC!!)
+
+#### 2) Carry out out of sample prediction:
+
+Use subset series lnserie2 to predict 2019 data
+
+
+```{r}
+pred=predict(mod2,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=12)
+
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+```
+
+Plot of the original airbcn series (thousands) and out-of-sample predictions(only time window 2015-2019 shown)
+
+```{r}
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-3,+2),type="o",main="Model ARIMA(0,1,1)(2,1,0)12")
+abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+Tabulize values of: point and interval predictions, observations and prediction-errors.
+
+```{r}
+(previs=window(cbind(tl,pr,tu,serie,error=round(serie-pr,3)),start=ultim))
+```
+
+Also, compute and report predictive ability measures: RMSPE and MAPE
+
+```{r}
+obs=window(serie,start=ultim)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI1)
+```
+
+#### 3) Perform long term predictions
+
+Predict values for 2020 based on the complete series lnserie1 (from 1990-2019).
+
+```{r}
+pred=predict(mod,n.ahead=12)
+pr<-ts(c(tail(lnserie,1),pred$pred),start=ultim+c(1,0),freq=12)
+se<-ts(c(0,pred$se),start=ultim+c(1,0),freq=12)
+
+#Intervals
+tl1<-ts(exp(pr-1.96*se),start=ultim+c(1,0),freq=12)
+tu1<-ts(exp(pr+1.96*se),start=ultim+c(1,0),freq=12)
+pr1<-ts(exp(pr),start=ultim+c(1,0),freq=12)
+
+ts.plot(serie,tl1,tu1,pr1,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(ultim[1]-2,ultim[1]+3),type="o",main="Model ARIMA(0,1,1)(2,1,0)12")
+abline(v=(ultim[1]-2):(ultim[1]+3),lty=3,col=4)
+```
+
+
+```{r}
+(previs1=window(cbind(tl1,pr1,tu1),start=ultim+c(1,0)))
+```
+
+## II. ARIMA Model with Outliers Treatment
+
+Load corresponding R-function: atipics2
+
+```{r}
+########## Atípics (Outliers) ###############################################
+source("atipics2.r")
+```
+
+- The atipics2 R-script contains two R-functions named outdetec and lineal.
+
+- The outdetec R-function returns the automatically detected outliers and their types.
+
+- The lineal R-function returns the so called linearized or theoretical series (free of outliers).
+
+- An ARIMA model is identified and fitted to this linearized series. The found model, once validated, can be used for performing forecasting. It would be expected that one gets better predictions; particularly more precise ones. Be aware that this model might be different than the one found with no treatment of outliers.
+
+### IIa) Outliers automatic detection and its treatment
+
+#### Automatic detection of outliers based on the previously fitted $ARIMA(0,1,1)(2,1,0)_{12}$ model
+
+```{r}
+##Detection of outliers: In this case, we have applied a regular and a seasonal differentiation of order $S=12$. We set the criterion to $crit = 2.8$ and also the argument LS to TRUE.
+## The crit value chosen by the researcher is typically fixed around 3; the LS argument is optional (= TRUE if one aims to detect a level shift)
+
+mod.atip=outdetec(mod,dif=c(1,12),crit=2.8,LS=T) # automatic detection of outliers with crit=2.8 and LS =TRUE
+
+# 12 indicates the seasonal difference applied, if none it is 0
+
+#Estimated residual variance after outliers detection and treatment
+mod.atip$sigma
+```
+
+#### Table with detected outliers, their types, magnitud, statistic values and chronology and percentage of variation (relative since in log scale)
+
+```{r}
+atipics=mod.atip$atip[order(mod.atip$atip[,1]),]
+meses=c("Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic")
+
+data.frame(atipics,Fecha=paste(meses[(atipics[,1]-1)%%12+1],start(lnserie)[1]+((atipics[,1]-1)%/%12)),perc.Obs=exp(atipics[,3])*100)
+
+# Los w coeff son positivos --> Cambio positivo (y así)
+```
+
+Some interpretation of results:
+
+- The 14th observation is a transitory change (TC) type of outlier with a significant statistic’s value |6.12|>2. Its magnitud is given by Wcoeff=−0.21 in the log scale (our series was log-transformed), which means that a decrease in the number of passengers is observed with respect to what would have happened if this atypical had not taken place. The effect of the TC outlier is noticed in February 1991 (Irak war), but attenuates relatively fast after few periods (exponential decrease with delta=0.7, usually).
+
+- The second is an additive outlier (AO) that occurs in August 1992 (Olympic games in Bcn). As learned in theory, its effect is only noticed at that specific date.
+
+- In November 2012 a level shift (LS) type of outlier is detected; that coincides with the year of the second economic crisis. Its effect takes place from that moment on.
+
+Be reminded that the magnitud column (W_coeff) is on the log scale), but if we appply the exponential function and multiply by 100% we get the percentage relative variation effect. In case of the previously mentioned TC in Feb. 1991, we get $exp(−0.21594176)=0.8057822$. This means that, in Feb. 1991, we only observed 80% of the flights that would have occurred without the presence of this atypical phenomenon (Iraq war); an effect of a 19.37% decrease (black line below red).
+
+#### **Comparing observed series with linearized (without outliers) series**
+
+Plot together (in original scale) the observed and the linearized series (without outliers)
+
+```{r}
+lnserie.lin=lineal(lnserie,mod.atip$atip)
+serie.lin=exp(lnserie.lin)
+
+plot(serie.lin,col=2)
+lines(serie)
+```
+#### **Profile of outliers effect: plot of the outliers effect in the log-transformed series**
+
+```{r}
+plot(lnserie-lnserie.lin)
+```
+
+Just by looking at this profile you can easily identify the different types of outliers…
+
+### IIb) Identification and Estimation based on the Linearized Series
+
+#### Identify an ARIMA model to the linearized series (in log-sacle in this case)
+
+P(ACF) of linearized series (in log-scale)
+
+```{r}
+d1d12lnserie.lin=diff(diff(lnserie.lin,12))
+par(mfrow=c(1,2))
+acf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(2,rep(1,11)),lwd=2)
+pacf(d1d12lnserie.lin,ylim=c(-1,1),lag.max=72,col=c(rep(1,11),2),lwd=2)
+par(mfrow=c(1,1))
+```
+
+The same $ARIMA(0,1,1)(2,1,0)_{12}$ model is identified for the log-linearized series. It coincides with the model previously fitted to the log-series with no-treatment of outliers. **(this doesn’t ALWAYS happen)**.
+
+#### Estimation of the identified $ARIMA(0,1,1)(2,1,0)_{12}$ model to the (log) linearized series
+
+```{r}
+(mod.lin=arima(lnserie.lin,order=c(0,1,1),seasonal=list(order=c(2,1,0),period=12)))
+```
+
+All coeffs are significant! The residual variance decreased, as expected!
+
+Proceed to validate the model.
+
+#### Validation of model fitted to the (log) linearized series
+
+```{r}
+dades=d1d12lnserie.lin  #stationary
+model=mod.lin  #Fitted ARIMA model to the log-linearized series
+validation(model,dades)
+```
+
+**Reminder:** provide the explicit expression of the fitted ARIMA model, together with the estimated noise variance and AIC!
+
+**Validation: Conclusions and Remarks**
+
+- As done in practical classes; fully comment all plots and outputs: …(guide yourself by validation report in Part I)
+
+- How the validation results change: which one are better? Which stay the same? …
+
+- What would you expect to change, after treating outliers?
+
+#### Forecasting (based on a reasonably valid model)
+
+##### 1) Is the proposed $ARIMA(0,1,1)(2,1,0)_{12}$ model stable? (in significance, sign and magnitud)
+
+```{r}
+ultim=c(2018,12)
+pdq=c(0,1,1)
+PDQ=c(2,1,0)
+
+serie1.lin=window(serie.lin,end=ultim+c(1,0))
+lnserie1.lin=log(serie1.lin)
+serie2.lin=window(serie.lin,end=ultim)
+lnserie2.lin=log(serie2.lin)
+
+(mod.lin=arima(lnserie1.lin,order=pdq,seasonal=list(order=PDQ,period=12)))
+(mod2.lin=arima(lnserie2.lin,order=pdq,seasonal=list(order=PDQ,period=12)))
+```
+Stable!
+
+##### 2) Carry out out of sample prediction:
+
+Use subset series lnserie2.lin to predict 2019 data
+
+```{r}
+
+######### Out of sample prediction: reserve 2019 data
+
+pred=predict(mod2.lin,n.ahead=12)
+wLS=sum(mod.atip$atip[mod.atip$atip$type_detected=="LS" & mod.atip$atip$Obs<=length(serie)-12,3])
+predic=pred$pr+wLS
+pr<-ts(c(tail(lnserie2,1),predic),start=ultim,freq=12) #puntual predictions (log-scale) obtained
+se<-ts(c(0,pred$se),start=ultim,freq=12) #Standard errors for puntual predictions
+
+##Prediction Intervals (back transformed to original scale using exp-function)
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+#Plot of the original airbcn series (thousands) and out-of-sample predictions
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-3,+2),type="o",main="Model ARIMA(0,1,1)(2,1,0)12")
+abline(v=(ultim[1]-3):(ultim[1]+2),lty=3,col=4)
+```
+
+More precise pred-intervals obtained.
+
+Tabulize vaues of point and interval predictions, observations and prediction-errors. Also, compute predictive ability measures: RMSE and MAPE
+
+```{r}
+#####out of sample values
+(previs.lin=window(cbind(tl,pr,tu,serie,error=round(serie-pr,3)),start=ultim))
+```
+
+```{r}
+obs=window(serie,start=ultim)
+mod.RMSE2=sqrt(sum((obs-pr)^2)/12)
+mod.MAE2=sum(abs(obs-pr))/12
+mod.RMSPE2=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE2=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE2,"MAE"=mod.MAE2,"RMSPE"=mod.RMSPE2,"MAPE"=mod.MAPE2)
+
+mCI2=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI2)
+```
+
+Comment on the RMSPE and MAPE values…
+
+##### 3) Perform long term predictions
+
+```{r}
+pred=predict(mod.lin,n.ahead=12)
+wLS=sum(mod.atip$atip[mod.atip$atip$type_detected=="LS",3])
+
+##Must correct predictions for LS outliers
+predic=pred$pr+wLS
+
+pr<-ts(c(lnserie[length(lnserie)],predic),start=ultim+c(1,0),freq=12)
+se<-ts(c(0,pred$se),start=ultim+c(1,0),freq=12)
+
+#Intervals
+tl2<-ts(exp(pr-1.96*se),start=ultim+c(1,0),freq=12)
+tu2<-ts(exp(pr+1.96*se),start=ultim+c(1,0),freq=12)
+pr2<-ts(exp(pr),start=ultim+c(1,0),freq=12)
+
+ts.plot(serie,tl2,tu2,pr2,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-1,+3),type="o",main="Model ARIMA(0,1,1)(2,1,0)12+Outlier Correction")
+abline(v=(ultim[1]-2):(ultim[1]+3),lty=3,col=4)
+```
+
+
+```{r}
+(previs2=window(cbind(tl2,pr2,tu2),start=ultim+c(1,0)))
+```
+
+
+```{r}
+cbind(previs1,previs2)
+```
+
+
+**Exercise:** See January 2020 number of passangers (http://www.fomento.gob.es/BE/?nivel=2&orden=03000000): it is $2433.920$. Compare this January value with the corresponding point prediction. Comment on it and on the the obtained 95%CI:
+
+Lower Predicted Upper
+
+Jan 2020: 2236.473 2453.796 2692.236 (without outliers treatment)
+
+Jan 2020: 2291.538 2453.843 2627.644 (with outliers treatment)
+
+#### Summing-up!
+
+##### Plot in original scale the observations (black), together with predicted values and confidence bands (with outliers treatment (red/green) and without outliers treatment (pink/blue)).
+
+```{r}
+ts.plot(serie,tl1,tu1,pr1,tl2,tu2,pr2,lty=c(1,2,2,1,2,2,1),col=c(1,4,4,2,3,3,6),xlim=ultim[1]+c(1,3),type="o",main="AIRBCN")
+legend("topleft",c("ARIMA(0,1,1)(2,1,0)12","ARIMA(0,1,1)(2,1,0)12 with outlier treatment"),col=c(4,3),lty=1,lwd=2)
+abline(v=ultim[1]+1:3,lty=3,col=4)
+```
+
+
+Is it confirmed that more precise prediction intervals are obtained with the linearized series?
+
+### Selection of models: summary of criteria
+
+
+```{r}
+resul=data.frame(
+  par=c(length(coef(mod)),length(coef(mod.lin))+nrow(mod.atip$atip)),
+  Sigma2Z=c(mod$sigma2,mod.lin$sigma2),
+  AIC=c(AIC(mod),AIC(mod.lin)+2*nrow(mod.atip$atip)),
+  BIC=c(BIC(mod),BIC(mod.lin)+log(length(serie)-13)*nrow(mod.atip$atip)),
+  RMSE=c(mod.RMSE1,mod.RMSE2),
+  MAE=c(mod.MAE1,mod.MAE2),
+  RMSPE=c(mod.RMSPE1,mod.RMSPE2),
+  MAPE=c(mod.MAPE1,mod.MAPE2),
+  meanLength=c(mCI1,mCI2))
+row.names(resul)=c("ARIMA(0,1,1)(2,1,0)_12","ARIMA(0,1,1)(2,1,0)_12+Outliers")
+resul
+```
+
+Which model would you choose for prediction? Justify your answer!
+

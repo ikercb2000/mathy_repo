@@ -1,0 +1,315 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Session 3: EURODOL (non-Seasonal) ARIMA(p,d,q) Modelling
+
+### Aim: To identify (and fit) at least 2 plausible non-Seasonal ARIMA(p,d,q) models for the EURODOL time series
+
+#### EURODOL: Exchange rate; US dollars per euro or ECU (USD / EUR). January 1995 - December 2019; 25 years. Data source: official web Banco de España (https://www.bde.es/webbde/es/estadis/infoest/tipos/tipos.html).
+
+### I. Exploratory data analysis
+
+Import the data
+
+```{r}
+serie=ts((read.table("eurodol.dat")),start=1995,freq=12)
+print(round(serie,3))
+```
+
+Plot the time series EURODOL; describe it…
+
+```{r}
+plot(serie)
+abline(v=1995:2020,col=4,lty=3)
+
+
+```
+
+Remarks…
+
+Mention/describe here all known events in the period of study that might have influenced the EURODOL time series: …
+
+### II. Transformation into stationarity
+
+**Is Variance constant?**
+
+```{r}
+boxplot(serie~floor(time(serie)))
+#Mean-variance plot
+m=apply(matrix(serie,ncol=25),2,mean)
+v=apply(matrix(serie,ncol=25),2,var)
+plot(v~m,main="Mean-Variance plot")
+```
+
+We consider the varianza to be constant! A log transformation not needed: it does not change variability pattern.
+
+**Is seasonality present?**
+
+
+```{r}
+monthplot(serie)
+```
+
+
+
+Nope! It does not make sense to have seasonality in an exchange-rate time series variable!
+
+**Is the mean constant?**
+
+Plot again the whole time series
+
+```{r}
+plot(serie, ylab = "USD/EUR")
+abline(h=mean(serie),col=2)
+```
+
+Hmmm, not clear! Let us take a look at the ACF:
+
+```{r}
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+```
+
+
+The ACF decays very slowly towards zero, suggesting non-stationarity (non-constant mean yet). At this point we need to take a decision:
+
+- **Case 1.** Maybe not constant mean yet: we need to make it stationary by taking regular differences, or
+
+- **Case 2.** Already constant with non-zero mean = 1.21 (reversion to the mean): assume that the EURODOL series is already stationary!!
+
+#### **Case 1.** The EURODOL series is assumed to be non-stationary: Make the series stationary. Take a regular differentiation: d=1.
+
+```{r}
+d1serie=diff(serie)
+plot(d1serie)
+abline(h=0)
+```
+
+
+Now, the mean seemingly constant at zero!!!
+
+**Is an extra differentiation needed? Take an extra differentiation and compare the variances.**
+
+```{r}
+var(serie,na.rm=T)
+var(d1serie,na.rm=T)
+var(diff(d1serie),na.rm=T)
+```
+
+Nope! We observe that with extra regular difference the variance increases…
+
+**Is the current series already stationary? Plot the P(ACF) and decide!!**
+
+```{r}
+par(mar = c(3,4,3,1))
+acf(d1serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)),na.action=na.pass, main="Series d1serie")
+```
+
+
+Conclusion: The differenced (d=1) exchange rate time series EURODOL (d1serie) is stationary: constant mean(=0); constant variance. The covariance structure only depends on the lags and not on the time origen.
+
+In this case, d1serie=$W_t=(1−B)X_t$ with $μ_{W_t}=0$.
+
+#### **Case 1.** The EURODOL series is assumed to be already stationary
+
+In this case, serie=$W_t=X_t$ with $μ_{W_t}=1.21$.
+
+
+### III. Model Identification
+
+#### Inspect the P(ACF) and propose >=2 models (principle of parsimony!)
+
+#### **Case 1**. Identify possible values of p and q for the series **d1serie**
+
+```{r}
+par(mfrow=c(1,2), mar = c(3,4,3,1))
+acf(d1serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)),na.action=na.pass, main="Series d1serie")
+pacf(d1serie,ylim=c(-1,1),lag.max=60,col=c(rep(1,11),2),na.action=na.pass)
+```
+
+
+#### Two models proposed for the stationary time series **d1serie** (W_t). Model 1: AR(1) and Model 2: MA(1).
+
+#### **Case 2**. Identify possible values of p and q for the series: serie
+
+Reminder: plot the time series
+
+```{r}
+plot(serie)
+abline(v=1995:2020,col=4,lty=3)
+abline(h=1)
+abline(h=mean(serie), col=2)
+```
+
+ACF and PACF of **serie**
+
+```{r}
+par(mfrow=c(1,2))
+acf(serie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,11)))
+pacf(serie,ylim=c(-1,1),lag.max=60,col=c(rep(1,11),2))
+par(mfrow=c(1,1))
+```
+
+We observe an ACF that decays slowly towards zero! BUT, we force an stationary model: thus, and AR(2) identified (Model 3).
+
+### IV. Model Estimation and validation
+
+#### ‘Load’ the function ‘validation’: used later
+
+```{r}
+#################Validation#################################
+validation=function(model,dades){
+  s=frequency(get(model$series))
+  resid=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resid,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resid),3*sd(resid)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resid)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resid)
+  qqline(resid,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resid,breaks=20,freq=F)
+  curve(dnorm(x,mean=mean(resid),sd=sd(resid)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resid,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #ACF & PACF of square residuals 
+  par(mfrow=c(1,2))
+  acf(resid^2,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=1)
+  pacf(resid^2,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=1)
+  par(mfrow=c(1,1))
+  
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:20])
+  plot(psis[1:20], pch=16, main ="Psis-weights")
+  axis(1, 1:20)
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:20])
+  plot(pis[1:20], pch=16, main ="Pi-weights")
+  axis(1, 1:20)
+  
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resid(mod)))
+  
+  #Sample ACF vs. Teoric ACF
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  acf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample ACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36),ylim=c(-1,1), 
+       type="h",xlab="Lag",  ylab="", main="ACF Teoric")
+  abline(h=0)
+  
+  #Sample PACF vs. Teoric PACF
+  pacf(dades, ylim=c(-1,1) ,lag.max=36,main="Sample PACF")
+  
+  plot(ARMAacf(model$model$phi,model$model$theta,lag.max=36, pacf=T),ylim=c(-1,1),
+       type="h", xlab="Lag", ylab="", main="PACF Teoric")
+  abline(h=0)
+  par(mfrow=c(1,1))
+}
+################# Fi Validacio #################################
+```
+
+
+### **Case 1.** Estimation and Validation
+
+#### Model 1
+
+
+```{r}
+(mod=arima(d1serie,order=c(1,0,0))) #Stationary AR(1)
+(mod=arima(serie,order=c(1,1,0)))   #Non-stationary ARIMA(1,1,0) model for serie
+```
+
+```{r}
+dades=d1serie
+model=mod
+validation(model,dades)
+```
+
+**Model 1:** ARIMA(1,1,0) $(1-0.2993B)(1-B)X_t=Z_t \qquad Z_t\sim WN(0,\sigma_Z^2=0.0006723)$
+
+
+#### Model 2
+
+```{r}
+(mod=arima(d1serie,order=c(0,0,1))) #Stationary MA(1) model for d1serie
+(mod=arima(serie,order=c(0,1,1))) #Non-stationary ARIMA(0,1,1) model for serie
+```
+
+```{r}
+dades=d1serie
+model=mod
+validation(model,dades)
+```
+
+**Model 2:** ARIMA(0,1,1) $(1-B)X_t=(1+0.3252B)Z_t \qquad Z_t\sim WN(0,\sigma_Z^2=0.000666)$
+
+
+
+### **Case 2.** Estimation and Validation
+
+#### Model 3
+
+
+```{r}
+#Stationary AR(2) model for serie; intercept <> 0
+(mod=arima(serie,order=c(2,0,0)))
+```
+
+
+```{r}
+dades=serie
+model=mod
+validation(model,dades)
+```
+
+**Model 3:** ARIMA(2,0,0) $(1-1.2868B+0.3084B^2)(X_t-1.1965)=Z_t \qquad Z_t\sim WN(0,\sigma_Z^2=0.000661)$
+
+
+### V. Sum Up Adequacy Measures
+
+To do: Write down a summary of the adequacy measures
+
+#### Model chosen? Justify your answer!
+
+Recall:
+
+Model 1: $(1-0.2993B)(1-B)X_t=Z_t \Rightarrow (1-1.2993B+0.2993B^2)X_t=Z_t$
+
+Model 3: $(1-1.2868B+0.3084B^2)(X_t-1.1965)=Z_t \Rightarrow (1-1.2868B+0.3084B^2)X_t=0.0258444+Z_t$
